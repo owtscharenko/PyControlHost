@@ -72,6 +72,8 @@ pybar/data*/
 *.png
 *.pdf
 .idea/*
+libconthost_shared.so
+build/*
 
 # Mac
 .DS_Store
