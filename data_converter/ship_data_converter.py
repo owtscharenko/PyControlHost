@@ -42,7 +42,8 @@ class DataConverter():
         self.socket_addr = socket_addr
         self.context = zmq.Context()
         self.socket_pull = self.context.socket(zmq.SUB)  # subscriber
-        self.socket_pull.setsockopt(zmq.SUBSCRIBE, '')  # do not filter any data
+        self.socket_pull.setsockopt(
+            zmq.SUBSCRIBE, '')  # do not filter any data
         self.socket_pull.connect(self.socket_addr)
 
     def on_set_integrate_readouts(self, value):
@@ -56,31 +57,73 @@ class DataConverter():
 
     def analyze_raw_data(self, raw_data):
         self.interpreter.interpret_raw_data(raw_data)
-        hits_array = self.interpreter.get_hits()
+        self.interpreter.get_hits()
 
-    def process_data(self, hits_array):  # process each hit to one string, representing bits
+    def process_data(self):  # process each hit to one bitstring
         ch_hit_data = []
-        for hit in hits_array:
-            row = hits_array['row'][hit]
-            column = hits_array['column'][hit]
-            channelID = "{0:b}".format(row * column)
-            
-            hitTime = "{0:b}".format(hits_array['relative_BCID'][hit])
-            tot = "{0:b}".format(hits_array['tot'][hit])
-            feID = "{0:b}".format(7)
-            
-            ch_additional_dataword = hitTime + feID + tot
-            ch_hit_data.append(channelID, ch_additional_dataword)
-        print ch_hit_data
-        
-        self.finished.emit()
+        while(not self._stop_readout.wait(0.01)):  # use wait(), do not block here
+            with self.reset_lock:
+                try:
+                    meta_data = self.socket_pull.recv_json(flags=zmq.NOBLOCK)
+                except zmq.Again:
+                    pass
+                else:
+                    name = meta_data.pop('name')
+                    if name == 'ReadoutData':
+                        data = self.socket_pull.recv()
+                        # reconstruct numpy array
+                        buf = buffer(data)
+                        dtype = meta_data.pop('dtype')
+                        shape = meta_data.pop('shape')
+                        data_array = np.frombuffer(buf, dtype=dtype).reshape(shape)
+                        for hit in data_array:
+                            row = data_array['row'][hit]
+                            column = data_array['column'][hit]
+                            channelID = "{:16b}".format(row * column)
+                
+                            hitTime = "{:4b}".format(data_array['relative_BCID'][hit])
+                            tot = "{:4b}".format(data_array['tot'][hit])
+                            feID = "{:2b}".format(7)
+                
+                            ch_additional_dataword = hitTime + feID + tot
+                            ch_hit_data.extend((channelID, ch_additional_dataword))
+                        print ch_hit_data
 
-    def send_data(self,address, data):
+    def build_header(self, n_hits, partitionID, cycleID, trigger_timestamp, bcids=16, flag=0):
+        """
+        builds data frame header from input information, python variables have to be converted to bitstrings. 8 bit = 1 byte, 2 hex digits = 1 byte
+
+        input variables:
+        n_hits: int , used to calculate length of data frame, 1 hit = 4 byte
+        partitionID: int, fixed for each MMC3 board
+        cycleID: int, see below, provided by run control
+        trigger_timestamp: int, used as frameTime (see below)
+
+        format:
+            size (2 byte) = length of data frame in bytes including header
+            partitionID (2 byte) = 0000 to 0002
+            cycleIdentifier (4 byte) = time of spill in SHiP time format: 0.2 seconds steps since the 8 April 2015
+            frameTime (4 byte) = start of trigger window relative to SoC in 25ns steps
+            timeExtent (2 byte) = length of the trigger window in 25ns steps
+            flags (2 byte) = empty for now
+
+        """
+        data_header = "{:16b}".format(n_hits * 4 + 16) + "{:16b}".format(partitionID) + "{:32b}".format(
+            cycleID) + "{:32b}".format(trigger_timestamp) + "{:04b}".format(bcids - 1) + "{:04b}".format(flag)
+
+        return data_header
+
+    def send_data(self, address, data_header, hit_data):
+        data = []
+        data.extend((data_header, hit_data))
+        data = np.ascontiguousarray(data, str)
+        
         ch.init_disp(address)
-        ch.send_fulldata()
+        ch.send_fulldata(data)
 
     def stop(self):
         self._stop_readout.set()
+
 
 if __name__ == '__main__':
     usage = "Usage: %prog ADDRESS"
@@ -93,4 +136,3 @@ if __name__ == '__main__':
         socket_addr = args[0]
     else:
         parser.error("incorrect number of arguments")
-
