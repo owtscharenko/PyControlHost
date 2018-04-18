@@ -16,6 +16,8 @@ You have to have Python 2/3 with the following modules installed:
   - scipy
   - matplotlib
   - numba
+ 
+You also have to have installed controlhost, and compiled a dynamic library libconthos.so
 
 If you are new to Python please look at the installation guide in the wiki.
 Since it is recommended to change example files according to your needs you should install the module with
