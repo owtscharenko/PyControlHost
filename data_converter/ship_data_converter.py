@@ -44,8 +44,7 @@ class DataConverter():
         self.socket_addr = socket_addr
         self.context = zmq.Context()
         self.socket_pull = self.context.socket(zmq.SUB)  # subscriber
-        self.socket_pull.setsockopt(
-            zmq.SUBSCRIBE, '')  # do not filter any data
+        self.socket_pull.setsockopt(zmq.SUBSCRIBE, '')  # do not filter any data
         self.socket_pull.connect(self.socket_addr)
 
     def on_set_integrate_readouts(self, value):
@@ -63,23 +62,34 @@ class DataConverter():
         self.max_trigger_number = 2 ** 31 - 1  # 31 bit?
         self.interpreter.interpret_raw_data(raw_data)
         self.interpreter.align_at_trigger(True)
-        self.process_data(self.interpreter.get_hits())
+        self.interpreter.get_hits()
+#         self.process_data(self.interpreter.get_hits(),moduleID)
 
 
-    def process_data(self, data_array):  # process each hit to one bitstring
+    def process_data(self, data_array, moduleID):
         '''
         each hit is converted to two 16bit datawords, 1st word is pixel of
-        FE, second word is number of FE + relBCID + tot
+        FE, second word is relBCID + number of FE + tot
         
-        data_array dtypes:
-                [('event_number', '<i8'), ('trigger_number', '<u4'), ('trigger_time_stamp', '<u4'), 
-                ('relative_BCID', 'u1'), ('LVL1ID', '<u2'), ('column', 'u1'), ('row', '<u2'), 
-                ('tot', 'u1'), ('BCID', '<u2'), ('TDC', '<u2'), ('TDC_time_stamp', 'u1'), 
-                ('trigger_status', 'u1'), ('service_record', '<u4'), ('event_status', '<u2')]
+        order of data_array:
+                [('event_number', '<i8'),
+                ('trigger_number', '<u4'),
+                ('trigger_time_stamp', '<u4'), 
+                ('relative_BCID', 'u1'),
+                ('LVL1ID', '<u2'),
+                ('column', 'u1'),
+                ('row', '<u2'), 
+                ('tot', 'u1'),
+                ('BCID', '<u2'),
+                ('TDC', '<u2'), 
+                ('TDC_time_stamp', 'u1'), 
+                ('trigger_status', 'u1'),
+                ('service_record', '<u4'),
+                ('event_status', '<u2')]
         '''
 
         ch_hit_data = []
-
+#         events = build_events_from_raw_data(data_array)
         for i in range(len(data_array)):
 
             hit_row = data_array['row'][i]
@@ -87,16 +97,19 @@ class DataConverter():
             channelID = "{:016b}".format(hit_row * column)
             hitTime = "{:04b}".format(data_array['relative_BCID'][i])
             tot = "{:04b}".format(data_array['tot'][i])
-            feID = "{:02b}".format(7)
+            feID = "{:02b}".format(moduleID)
 
             ch_additional_dataword = hitTime + feID + tot
             ch_hit_data.extend((channelID, ch_additional_dataword))
+        hit_data = np.ascontiguousarray(ch_hit_data, dtype=str)
         print ch_hit_data[:2]
 
 
     def build_header(self, n_hits, partitionID, cycleID, trigger_timestamp, bcids=16, flag=0):
         """
-        builds data frame header from input information, python variables have to be converted to bitstrings. 8 bit = 1 byte, 2 hex digits = 1 byte
+        builds data frame header from input information,
+        python variables have to be converted to bitstrings.
+        8 bit = 1 byte, 2 hex digits = 1 byte
 
         input variables:
         n_hits: int , used to calculate length of data frame, 1 hit = 4 byte
@@ -118,19 +131,19 @@ class DataConverter():
 
         return data_header
 
-    def build_data_array(self, address, data_header, hit_data):
+    def build_event_frame(self, data_header, hit_data):
         """
         sends data to controlhost dispatcher
         input:
             address: IP-address of dispatcher
             data_header: bitstring with frame_header info
-            hit_data: list of bitstrings, 2 strings for each hit in event_frame
+            hit_data: list of bitstrings, 2 strings (2 byte each) for each hit in event_frame
         """
-        data = []
-        data.extend((data_header, hit_data))
-        data = np.ascontiguousarray(data, str)
+        event_frame = []
+        event_frame.extend((data_header, hit_data))
+        event_frame = np.ascontiguousarray(event_frame, str)
 
-        return data
+        return event_frame
 
     def run(self):
         while(not self._stop_readout.wait(0.01)):  # use wait(), do not block here
@@ -141,7 +154,10 @@ class DataConverter():
                     pass
                 else:
                     name = meta_data.pop('name')
-                    if name == 'ReadoutData':
+                    if name =='Filename':
+                        print meta_data.pop('conf')
+                         
+                    elif name == 'ReadoutData':
                         data = self.socket_pull.recv()
                         # reconstruct numpy array
                         buf = buffer(data)
@@ -150,6 +166,7 @@ class DataConverter():
                         data_array = np.frombuffer(
                             buf, dtype=dtype).reshape(shape)
                         self.analyze_raw_data(data_array)
+                        self.process_data(self.interpreter.get_hits(), moduleID=1)
 
     def stop(self):
         self._stop_readout.set()
