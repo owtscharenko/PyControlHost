@@ -5,22 +5,24 @@ from optparse import OptionParser
 
 import zmq
 import numpy as np
+from numba import njit
 
 from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
 from pybar_fei4_interpreter.data_histograming import PyDataHistograming
 
 # from ch_transmission import control_host_coms as ch
-# from ch_transmission import ship_data_format
 
 
 class DataConverter():
 
-    def __init__(self):
+    def __init__(self, socket_addr):
         self.integrate_readouts = 1
         self.n_readout = 0
         self._stop_readout = Event()
         self.setup_raw_data_analysis()
         self.reset_lock = Lock()
+        self.connect(socket_addr)
+        self.run()
 
     def setup_raw_data_analysis(self):
         self.interpreter = PyDataInterpreter()
@@ -56,38 +58,41 @@ class DataConverter():
             self.n_readout = 0
 
     def analyze_raw_data(self, raw_data):
+        self.create_empty_event_hits = True
+        self.trigger_data_format = 1
+        self.max_trigger_number = 2 ** 31 - 1  # 31 bit?
         self.interpreter.interpret_raw_data(raw_data)
-        self.interpreter.get_hits()
+        self.interpreter.align_at_trigger(True)
+        self.process_data(self.interpreter.get_hits())
 
-    def process_data(self):  # process each hit to one bitstring
+    @njit
+    def process_data(self, data_array):  # process each hit to one bitstring
+        '''
+        each hit is converted to two 16bit datawords, 1st word is pixel of
+        FE, second word is number of FE + relBCID + tot
+        
+        data_array dtypes:
+                [('event_number', '<i8'), ('trigger_number', '<u4'), ('trigger_time_stamp', '<u4'), 
+                ('relative_BCID', 'u1'), ('LVL1ID', '<u2'), ('column', 'u1'), ('row', '<u2'), 
+                ('tot', 'u1'), ('BCID', '<u2'), ('TDC', '<u2'), ('TDC_time_stamp', 'u1'), 
+                ('trigger_status', 'u1'), ('service_record', '<u4'), ('event_status', '<u2')]
+        '''
+
         ch_hit_data = []
-        while(not self._stop_readout.wait(0.01)):  # use wait(), do not block here
-            with self.reset_lock:
-                try:
-                    meta_data = self.socket_pull.recv_json(flags=zmq.NOBLOCK)
-                except zmq.Again:
-                    pass
-                else:
-                    name = meta_data.pop('name')
-                    if name == 'ReadoutData':
-                        data = self.socket_pull.recv()
-                        # reconstruct numpy array
-                        buf = buffer(data)
-                        dtype = meta_data.pop('dtype')
-                        shape = meta_data.pop('shape')
-                        data_array = np.frombuffer(buf, dtype=dtype).reshape(shape)
-                        for hit in data_array:
-                            row = data_array['row'][hit]
-                            column = data_array['column'][hit]
-                            channelID = "{:16b}".format(row * column)
-                
-                            hitTime = "{:4b}".format(data_array['relative_BCID'][hit])
-                            tot = "{:4b}".format(data_array['tot'][hit])
-                            feID = "{:2b}".format(7)
-                
-                            ch_additional_dataword = hitTime + feID + tot
-                            ch_hit_data.extend((channelID, ch_additional_dataword))
-                        print ch_hit_data
+
+        for i in range(len(data_array)):
+
+            hit_row = data_array['row'][i]
+            column = data_array['column'][i]
+            channelID = "{:016b}".format(hit_row * column)
+            hitTime = "{:04b}".format(data_array['relative_BCID'][i])
+            tot = "{:04b}".format(data_array['tot'][i])
+            feID = "{:02b}".format(7)
+
+            ch_additional_dataword = hitTime + feID + tot
+            ch_hit_data.extend((channelID, ch_additional_dataword))
+        print ch_hit_data[:2]
+
 
     def build_header(self, n_hits, partitionID, cycleID, trigger_timestamp, bcids=16, flag=0):
         """
@@ -113,13 +118,38 @@ class DataConverter():
 
         return data_header
 
-    def send_data(self, address, data_header, hit_data):
+    def build_data_array(self, address, data_header, hit_data):
+        """
+        sends data to controlhost dispatcher
+        input:
+            address: IP-address of dispatcher
+            data_header: bitstring with frame_header info
+            hit_data: list of bitstrings, 2 strings for each hit in event_frame
+        """
         data = []
         data.extend((data_header, hit_data))
         data = np.ascontiguousarray(data, str)
-        
-        ch.init_disp(address)
-        ch.send_fulldata(data)
+
+        return data
+
+    def run(self):
+        while(not self._stop_readout.wait(0.01)):  # use wait(), do not block here
+            with self.reset_lock:
+                try:
+                    meta_data = self.socket_pull.recv_json(flags=zmq.NOBLOCK)
+                except zmq.Again:
+                    pass
+                else:
+                    name = meta_data.pop('name')
+                    if name == 'ReadoutData':
+                        data = self.socket_pull.recv()
+                        # reconstruct numpy array
+                        buf = buffer(data)
+                        dtype = meta_data.pop('dtype')
+                        shape = meta_data.pop('shape')
+                        data_array = np.frombuffer(
+                            buf, dtype=dtype).reshape(shape)
+                        self.analyze_raw_data(data_array)
 
     def stop(self):
         self._stop_readout.set()
@@ -136,3 +166,5 @@ if __name__ == '__main__':
         socket_addr = args[0]
     else:
         parser.error("incorrect number of arguments")
+
+    conv = DataConverter(socket_addr=socket_addr)

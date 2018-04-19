@@ -28,7 +28,7 @@ def send_fulldata(const char *tag, cnp.ndarray[cnp.int32_t, ndim=1] buf, int siz
     return put_fulldata(tag, <const void *>buf.data, size)
    
 def rec_data(buf, lim): # makes memcpy to buf of size lim
-    return get_data(<void *>buf.data, lim)
+    return get_data(<void *>buf.data, lim), buf
 
 def send_fullstring(const char *tag, const char *string):
     return put_fullstring(<const char *>tag, <const char *>string)
