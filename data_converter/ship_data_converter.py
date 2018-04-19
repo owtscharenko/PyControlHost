@@ -65,7 +65,7 @@ class DataConverter():
         self.interpreter.align_at_trigger(True)
         self.process_data(self.interpreter.get_hits())
 
-    @njit
+
     def process_data(self, data_array):  # process each hit to one bitstring
         '''
         each hit is converted to two 16bit datawords, 1st word is pixel of
