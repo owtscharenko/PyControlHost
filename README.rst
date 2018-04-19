@@ -4,8 +4,6 @@ Introduction
 
 This repository is providing scripts necessary for communication of pyBAR with the DAQ (dispatcher, run control) of the SHiP Charm experiment
 
-In a future release it is forseen to enhance the alignment to work more reliable.
-
 Installation
 ============
 You have to have Python 2/3 with the following modules installed:
