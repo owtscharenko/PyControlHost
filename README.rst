@@ -16,6 +16,7 @@ You have to have Python 2/3 with the following modules installed:
 You also have to have installed ControlHost in the same folder as the top project folder, and compiled a dynamic library libconthost.so
 
 The installation procedure for ControlHost is as follows:
+
 - Download and untar archive to emtpy directory, e.g. "ControlHost".
 - cd ControlHost/src/
 - add the following lines to Makefile.project:
