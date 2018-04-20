@@ -2,7 +2,8 @@
 Introduction
 ===============================================
 
-This repository is providing scripts necessary for communication of pyBAR with the DAQ (dispatcher, run control) of the SHiP Charm experiment
+This repository is providing scripts necessary for communication of pyBAR with the DAQ (dispatcher, run control) of the SHiP Charm experiment.
+Hit data from FE-I4 modules (provided by pyBAR) is converted to SHiP data format and sent to DAQ. Also run_control commands are recieved and executed.
 
 Installation
 ============
@@ -16,7 +17,6 @@ You have to have Python 2/3 with the following modules installed:
 You also have to have installed ControlHost in the same folder as the top project folder, and compiled a dynamic library libconthost.so
 
 The installation procedure for ControlHost is as follows:
-
 - Download and untar archive to emtpy directory, e.g. "ControlHost". Go to this directory:
 
 .. code-block:: bash
