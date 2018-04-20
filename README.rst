@@ -28,10 +28,11 @@ CXXFLAGS_COMMON := -fPIC $(CXXFLAGS_COMMON)
 4. make # (ignore compiler warnings)
 5. copy the static libary "libconthost.a" to an temporary empty directory
 6. in this directory perform the following commands one by one
-.. code-block:: bash
-		ar -x libconthost.a
-		gcc -shared *.o -o libconthost_shared.so
-		rm -f *.o
+```bash
+ar -x libconthost.a
+gcc -shared *.o -o libconthost_shared.so
+rm -f *.o
+```
 
 6. copy conthost_shared.so to the "ControlHost" folder.
 7. `cd ../bin; ls -l`  # check the presence of the system binary files dispatch, dispstat, stopdisp and the application executables tst1, tstsnd, tstrcv
