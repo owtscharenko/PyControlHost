@@ -17,5 +17,6 @@ extensions = [
 
 setup(
     name = "PyControlHost",
+    include_dirs = [np.get_include()], # needed on some systems to provided numpy c-library to compiler
     ext_modules = cythonize(extensions),
 )

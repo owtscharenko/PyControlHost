@@ -9,6 +9,7 @@ from numba import njit
 
 from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
 from pybar_fei4_interpreter.data_histograming import PyDataHistograming
+from pybar.daq.readout_utils import build_events_from_raw_data, is_trigger_word
 
 # from ch_transmission import control_host_coms as ch
 
