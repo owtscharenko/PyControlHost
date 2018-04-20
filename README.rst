@@ -18,7 +18,11 @@ You also have to have installed ControlHost in the same folder as the top projec
 The installation procedure for ControlHost is as follows:
 
 - Download and untar archive to emtpy directory, e.g. "ControlHost".
-- cd ControlHost/src/
+
+.. code-block:: bash
+
+	cd ControlHost/src/
+	
 - add the following lines to Makefile.project:
 
 .. code-block:: bash
@@ -39,8 +43,11 @@ The installation procedure for ControlHost is as follows:
 	rm -f *.o
 	
 - copy conthost_shared.so to the "ControlHost" folder.
-- cd ../bin; ls -l  # check the presence of the system binary files dispatch, dispstat, stopdisp and the application executables tst1, tstsnd, tstrcv
+- check the presence of the system binary files dispatch, dispstat, stopdisp and the application executables tst1, tstsnd, tstrcv
 
+.. code-block:: bash
+
+	cd ../bin; ls -l
 	
 If you are new to Python please look at the installation guide in the wiki.
 Since it is recommended to change example files according to your needs you should install the module with
