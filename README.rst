@@ -17,7 +17,7 @@ You also have to have installed ControlHost in the same folder as the top projec
 
 The installation procedure for ControlHost is as follows:
 
-- Download and untar archive to emtpy directory, e.g. "ControlHost".
+- Download and untar archive to emtpy directory, e.g. "ControlHost". Go to this directory:
 
 .. code-block:: bash
 
@@ -32,7 +32,12 @@ The installation procedure for ControlHost is as follows:
 	CFLAGS_COMMON := -fPIC $(CFLAGS_COMMON)
 	CXXFLAGS_COMMON := -fPIC $(CXXFLAGS_COMMON)
 
-- make # (ignore compiler warnings)
+- build the project:
+
+.. code-block:: bash
+	
+	make
+
 - copy the static libary "libconthost.a" to an temporary empty directory
 - in this directory perform the following commands one by one
 	
@@ -43,7 +48,7 @@ The installation procedure for ControlHost is as follows:
 	rm -f *.o
 	
 - copy conthost_shared.so to the "ControlHost" folder.
-- check the presence of the system binary files dispatch, dispstat, stopdisp and the application executables tst1, tstsnd, tstrcv
+- check the presence of the system binary files dispatch, dispstat, stopdisp and the application executables tst1, tstsnd, tstrcv:
 
 .. code-block:: bash
 
