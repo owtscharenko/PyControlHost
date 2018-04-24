@@ -1,5 +1,5 @@
 import time, sys
-import ch_transmission.control_host_coms as ch
+import PyControlHost.control_host_coms as ch
 import numpy as np
 
 # host = "131.220.165.153"
