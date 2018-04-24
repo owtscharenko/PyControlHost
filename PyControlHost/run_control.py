@@ -39,8 +39,10 @@ class ch_communicator():
         
     def connect(self, socket_addr, tag):
         if socket_addr == None:
-            socket_addr = '0.0.0.0'
+            socket_addr = '127.0.0.1'
         self.status = ch.init_disp(socket_addr, "a " + tag)
+        if self.status < 0:
+            raise RuntimeError('connection to %s failed' % socket_addr)
         print self.status
         if self.status >= 0:
             logging.info('connected to %s' % socket_addr)
@@ -68,8 +70,8 @@ class ch_communicator():
         
     
 if __name__ == '__main__':
-    controlHost = ch_communicator("pcitep04.cern.ch")
-    
+    controlHost = ch_communicator() #"pcitep04.cern.ch"
+    print controlHost.send_data(np.ascontiguousarray('1011111'))
     
     
     

@@ -1,9 +1,9 @@
 # distutils: language = c++
 # cython: boundscheck=False
 # cython: wraparound=False
-
+cimport cython
 cimport numpy as cnp
-from numpy cimport ndarray
+# from numpy cimport ndarray
 cnp.import_array()  # if array is used it has to be imported, otherwise possible runtime error
 
 cdef extern from "getdata.c":
@@ -13,6 +13,9 @@ cdef extern from "getdata.c":
     int put_fulldata(const char *tag, const void *buf, int size)
     int get_data(void *buf, int lim)
     int put_fullstring(const char *tag, const char *string)
+    
+cdef int buf(cnp.ndarray a):
+    return 6
 
 
 def init_disp(const char *host, const char *subscr):
@@ -24,7 +27,9 @@ def check_head(char *tag, cnp.ndarray[cnp.int8_t, ndim=1] size):
 def send_data(const char *tag, cnp.ndarray[cnp.int8_t, ndim=1] buf, int size, cnp.ndarray[cnp.int8_t, ndim=1] pos):
     return put_data(tag, <const void *>buf.data, size, <int*>pos.data)
 
-def send_fulldata(const char *tag, cnp.ndarray[cnp.int32_t, ndim=1] buf, int size):
+# def send_fulldata(const char *tag, cnp.ndarray[cnp.int32_t, ndim=1] buf, int size):
+#     return put_fulldata(tag, <const void *>buf.data, size)
+def send_fulldata(const char *tag, buf, int size):
     return put_fulldata(tag, <const void *>buf.data, size)
    
 def rec_data(buf, lim): # makes memcpy to buf of size lim

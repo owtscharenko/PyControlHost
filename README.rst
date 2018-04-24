@@ -14,7 +14,8 @@ You have to have Python 2/3 with the following modules installed:
   - numpy
   - zmq
  
-You also have to have installed ControlHost in the same folder as the top project folder, and compiled a dynamic library libconthost.so
+You also have to have installed ControlHost in the same folder as the top project folder, and compiled a dynamic library libconthost.so.
+Also required are pixel_clusterizer, pyBAR and pybar_fei4_interpreter
 
 **The installation procedure for ControlHost is as follows:**
 

@@ -6,6 +6,8 @@ matplotlib  # for plotting
 numba>=0.30   # for speedup of python loops (python just in time compiler)
 future  # Python 2/3 compatibility
 pixel_clusterizer>=3.0  # to cluster pixel hits
+pyBAR # for Online Monitor and RunManager
+pybar_fei4_interpreter # for raw data analysis
 numexpr  # for fast c compiled loops on numpy arrays
 dill  # better serialization needed for multithreading
 numpydoc  # To use numpy docstring for gui tooltips

@@ -5,7 +5,7 @@ from optparse import OptionParser
 
 import zmq
 import numpy as np
-from numba import njit
+from numba import njit, jit
 
 from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
 from pybar_fei4_interpreter.data_histograming import PyDataHistograming
@@ -13,6 +13,21 @@ from pybar.daq.readout_utils import build_events_from_raw_data, is_trigger_word
 
 # from ch_transmission import control_host_coms as ch
 
+@jit(nopython=True)
+def transform_hits(data_array,moduleID):
+    ch_hit_data = []
+    for i in range(len(data_array)):
+
+            hit_row = data_array['row'][i]
+            column = data_array['column'][i]
+            channelID = "{:016b}".format(hit_row * column)
+            hitTime = "{:04b}".format(data_array['relative_BCID'][i])
+            tot = "{:04b}".format(data_array['tot'][i])
+            feID = "{:02b}".format(moduleID)
+
+            ch_additional_dataword = hitTime + feID + tot
+            ch_hit_data.extend((channelID, ch_additional_dataword))
+    return ch_hit_data
 
 class DataConverter():
 
@@ -88,18 +103,18 @@ class DataConverter():
                 ('service_record', '<u4'),
                 ('event_status', '<u2')]
         '''
-
+#         ch_hit_data = transform_hits(data_array, moduleID)
         ch_hit_data = []
 #         events = build_events_from_raw_data(data_array)
         for i in range(len(data_array)):
-
+ 
             hit_row = data_array['row'][i]
             column = data_array['column'][i]
             channelID = "{:016b}".format(hit_row * column)
             hitTime = "{:04b}".format(data_array['relative_BCID'][i])
             tot = "{:04b}".format(data_array['tot'][i])
             feID = "{:02b}".format(moduleID)
-
+ 
             ch_additional_dataword = hitTime + feID + tot
             ch_hit_data.extend((channelID, ch_additional_dataword))
         hit_data = np.ascontiguousarray(ch_hit_data, dtype=str)
@@ -134,17 +149,15 @@ class DataConverter():
 
     def build_event_frame(self, data_header, hit_data):
         """
-        sends data to controlhost dispatcher
+        builds frame to be sent to dispatcher
         input:
-            address: IP-address of dispatcher
             data_header: bitstring with frame_header info
             hit_data: list of bitstrings, 2 strings (2 byte each) for each hit in event_frame
         """
-        event_frame = []
-        event_frame.extend((data_header, hit_data))
-        event_frame = np.ascontiguousarray(event_frame, str)
 
+        event_frame = np.ascontiguousarray((data_header, hit_data), str)
         return event_frame
+
 
     def run(self):
         while(not self._stop_readout.wait(0.01)):  # use wait(), do not block here
