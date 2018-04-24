@@ -6,7 +6,7 @@ cimport numpy as cnp
 from numpy cimport ndarray
 cnp.import_array()  # if array is used it has to be imported, otherwise possible runtime error
 
-cdef extern from "../ControlHost/src/getdata.c":
+cdef extern from "getdata.c":
     int init_disp_link(const char *host, const char *subscr)
     int check_head(char *tag, int *size)
     int put_data(const char *tag, const void *buf, int size, int *pos)
