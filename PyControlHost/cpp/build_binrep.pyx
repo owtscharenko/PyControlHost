@@ -103,14 +103,14 @@ def hit_to_binary(np.ndarray[ch_hit_info,ndim=1] data_array, int moduleID):
         channelID = bitarray()
         second_word = bitarray()
 #         print data_array['row'][i], data_array['column'][i]
-        channelID.extend([binary_repr(bit_or(shift_left(data_array['row'][i],7), data_array['column'][i]))])
+        channelID.extend(binary_repr(bit_or(shift_left(data_array['row'][i],7), data_array['column'][i]),width=16))
 #         print binary_repr(shift_left(data_array['row'][i],7))
 #         print bit_or(shift_left(data_array['row'][i],7), data_array['column'][i])
 #         print binary_repr(bit_or(shift_left(data_array['row'][i],7), data_array['column'][i]),width=16)
-        second_word.extend([binary_repr(bit_or4(shift_left(data_array['tot'][i],12),
+        second_word.extend(binary_repr(bit_or4(shift_left(data_array['tot'][i],12),
                                                 shift_left(moduleID,8) ,
                                                 shift_left(0, 4),
-                                                data_array['relative_BCID'][i]),width=16)])
+                                                data_array['relative_BCID'][i]),width=16))
 #         print "tot " ,data_array['tot'][i], binary_repr(shift_left(data_array['tot'][i],12)) , "moduleID", binary_repr(shift_left(moduleID,8)), "0", binary_repr(shift_left(0,4)), "relative BCID",data_array['relative_BCID'][i], binary_repr(data_array['relative_BCID'][i])
 #         print binary_repr(bit_or4(shift_left(data_array['tot'][i],12),
 #                                                 shift_left(moduleID,8) ,
