@@ -13,13 +13,11 @@ from numba import njit,jit
 import timeit
 
 
-
+from build_binrep import hit_to_binary
 from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
 from pybar_fei4_interpreter.data_histograming import PyDataHistograming
 from pybar.daq.readout_utils import build_events_from_raw_data, is_trigger_word, get_col_row_tot_array_from_data_record_array
 from PyControlHost.run_control import run_control
-
-from basil.utils.BitLogic import *
 
 
 from subprocess import Popen
@@ -124,57 +122,73 @@ class DataConverter(object):
         self.interpreter.interpret_raw_data(raw_data)
 #         self.interpreter.get_hits()
 
+#     @profile
+#     def process_data(self, data_array, moduleID):
+#         '''
+#         each hit is converted to two 16bit datawords, 1st word is pixel of
+#         FE, second word is relBCID + number of FE + tot
+#         order of data_array:
+#                 [('event_number', '<i8'),
+#                 ('trigger_number', '<u4'),
+#                 ('trigger_time_stamp', '<u4'), 
+#                 ('relative_BCID', 'u1'),
+#                 ('LVL1ID', '<u2'),
+#                 ('column', 'u1'),
+#                 ('row', '<u2'), 
+#                 ('tot', 'u1'),
+#                 ('BCID', '<u2'),
+#                 ('TDC', '<u2'), 
+#                 ('TDC_time_stamp', 'u1'), 
+#                 ('trigger_status', 'u1'),
+#                 ('service_record', '<u4'),
+#                 ('event_status', '<u2')]
+#         '''
+#         self.ch_hit_data = []
+#  
+# #         if data_array.shape[0] != 0:
+# #             bitwords = data_array[['row','column']].copy()
+# #             print bitwords.dtype
+# # #             bitwords = np.array(map(bin,bitwords.flatten())).reshape(bitwords.shape)
+# #              
+# #             bitwords['row'] = (bitwords['row']).tobytes()
+# #             print bitwords['row']
+# #             bitwords['column'] = np.binary_repr(bitwords['column'][:],widht=7)
+# #             channelID.extend([bitwords['row']<<7 ^ bitwords['column']])
+# 
+#         for i in range(data_array.shape[0]):
+#             row = data_array['row'][i]
+#             column = data_array['column'][i]
+#              
+#             '''
+#             channelID = np.uint16(80*column + row) counts from left to right and from bottom to top
+#             eg: channelID =  1 : row = 0, column =1,
+#                 channelID =  2 : row = 0, column = 2
+#                 channelID = 81 : row = 1, column = 1
+#                 channelID = 162: row = 2, column = 2
+#             use function decode_channelID to decode
+#             '''
+#     #             channelID = struct.pack('H', np.uint16(80*column + row)) # unique ID for each pixel on FE.
+#             '''
+#             channelID: 16 bit word
+#                         first 7 bit: column
+#                         following 9 bit: row
+#             ch_2nd_dataword: 16 bit word. From MSB(left) to LSB(right)
+#                         highest 4 bit: BCID
+#                         second 4 bit: 0000 (in-BCID time res. can not be provided)
+#                         third 4 bit: moduleID (0-7 => 0000 to 0111)
+#                         lowest 4 bit: ToT
+#             '''
+#             channelID = bitarray()
+#             channelID.extend(np.binary_repr(row<<7 ^ column, width=16))
+#             ch_2nd_dataword = bitarray()
+#             ch_2nd_dataword.extend(np.binary_repr(data_array['tot'][i]<<12 ^ moduleID<<8 ^ 0<<4 ^ data_array['relative_BCID'][i],width = 16))
+#          
+#             self.ch_hit_data.extend((channelID, ch_2nd_dataword))
+
     @profile
     def process_data(self, data_array, moduleID):
-        '''
-        each hit is converted to two 16bit datawords, 1st word is pixel of
-        FE, second word is relBCID + number of FE + tot
-        order of data_array:
-                [('event_number', '<i8'),
-                ('trigger_number', '<u4'),
-                ('trigger_time_stamp', '<u4'), 
-                ('relative_BCID', 'u1'),
-                ('LVL1ID', '<u2'),
-                ('column', 'u1'),
-                ('row', '<u2'), 
-                ('tot', 'u1'),
-                ('BCID', '<u2'),
-                ('TDC', '<u2'), 
-                ('TDC_time_stamp', 'u1'), 
-                ('trigger_status', 'u1'),
-                ('service_record', '<u4'),
-                ('event_status', '<u2')]
-        '''
-        self.ch_hit_data = []
-        for i in range(len(data_array)):
-            row = data_array['row'][i]
-            column = data_array['column'][i]
-            
-            '''
-            channelID = np.uint16(80*column + row) counts from left to right and from bottom to top
-            eg: channelID =  1 : row = 0, column =1,
-                channelID =  2 : row = 0, column = 2
-                channelID = 81 : row = 1, column = 1
-                channelID = 162: row = 2, column = 2
-            use function decode_channelID to decode
-            '''
-#             channelID = struct.pack('H', np.uint16(80*column + row)) # unique ID for each pixel on FE.
-            '''
-            channelID: 16 bit word
-                        first 7 bit: column
-                        following 9 bit: row
-            ch_2nd_dataword: 16 bit word. From MSB(left) to LSB(right)
-                        highest 4 bit: BCID
-                        second 4 bit: 0000 (in-BCID time res. can not be provided)
-                        third 4 bit: moduleID (0-7 => 0000 to 0111)
-                        lowest 4 bit: ToT
-            '''
-            channelID = bitarray()
-            channelID.extend(np.binary_repr(row<<7 ^ column, width=16))
-            ch_2nd_dataword = bitarray()
-            ch_2nd_dataword.extend(np.binary_repr(data_array['tot'][i]<<12 ^ moduleID<<8 ^ 0<<4 ^ data_array['relative_BCID'][i],width = 16))
-        
-            self.ch_hit_data.extend((channelID, ch_2nd_dataword))
+        self.ch_hit_data = hit_to_binary(data_array[['row','column','tot','relative_BCID']].copy(), moduleID)
+
 
     @profile
     def build_header(self, n_hits, partitionID, cycleID, trigger_timestamp, bcids=15, flag=0):
@@ -204,7 +218,7 @@ class DataConverter(object):
         self.data_header = bitarray()
         self.data_header.extend(np.binary_repr(n_hits*4*16<<112 ^ partitionID<<96 ^ cycleID<<64 ^ trigger_timestamp<<32 ^ bcids<<16 ^ flag, width=128))
 
-        print self.data_header
+        print "data header:" , self.data_header
 
 
     def build_event_frame(self, data_header, hit_data):
@@ -278,5 +292,5 @@ if __name__ == '__main__':
         socket_addr = args[0]
     else:
         parser.error("incorrect number of arguments")
-
-    conv = DataConverter(socket_addr=socket_addr)
+         
+    DataConverter(socket_addr=socket_addr)
