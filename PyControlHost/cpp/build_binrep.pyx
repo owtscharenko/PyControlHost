@@ -85,7 +85,7 @@ cdef binary_repr(num, width=None):
         out = out.zfill(width)
     return sign + out
 
-cdef extern from "binrep.h":
+cdef extern from "bitops.h":
     unsigned int shift_left(unsigned int number,unsigned int positions)
     unsigned int bit_or(unsigned int number1, unsigned int number2)
     unsigned int bit_or4(unsigned int number1, unsigned int number2, unsigned int number3, unsigned int number4)
