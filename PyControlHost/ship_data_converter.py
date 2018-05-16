@@ -11,6 +11,8 @@ import numpy as np
 import datetime
 from numba import njit,jit
 import timeit
+import cProfile, pstats
+import pprint
 
 
 from build_binrep import hit_to_binary
@@ -46,29 +48,98 @@ def transfer_file(file_name, socket):  # Function to open the raw data file and 
             time.sleep(meta_data[index]['timestamp_stop'] - meta_data[index]['timestamp_start'])
             progress_bar.update(index)
         progress_bar.finish()
+        
+@njit             
+def process_data_numba(data_array, moduleID, flag=0):
+    '''
+    each hit is converted to two 16bit datawords, 1st word is pixel of
+    FE, second word is relBCID + number of FE + tot
+    order of data_array:
+            [('event_number', '<i8'),
+            ('trigger_number', '<u4'),
+            ('trigger_time_stamp', '<u4'), 
+            ('relative_BCID', 'u1'),
+            ('LVL1ID', '<u2'),
+            ('column', 'u1'),
+            ('row', '<u2'), 
+            ('tot', 'u1'),
+            ('BCID', '<u2'),
+            ('TDC', '<u2'), 
+            ('TDC_time_stamp', 'u1'), 
+            ('trigger_status', 'u1'),
+            ('service_record', '<u4'),
+            ('event_status', '<u2')]
+    '''
+    ch_hit_data = []
 
+    for i in range(data_array.shape[0]):
+        row = data_array['row'][i]
+        column = data_array['column'][i]
+          
+        '''
+        channelID = np.uint16(80*column + row) counts from left to right and from bottom to top
+        eg: channelID =  1 : row = 0, column =1,
+            channelID =  2 : row = 0, column = 2
+            channelID = 81 : row = 1, column = 1
+            channelID = 162: row = 2, column = 2
+        use function decode_channelID to decode
+        '''
 
+        channelID = np.uint16(column<<9 ^ row)
+        '''
+        channelID: 16 bit word
+                    first 7 bit: column
+                    following 9 bit: row
+        ch_2nd_dataword: 16 bit word. From MSB(left) to LSB(right)
+                    highest 4 bit: BCID
+                    second 4 bit: 0000 (in-BCID time res. can not be provided)
+                    third 4 bit: moduleID (0-7 => 0000 to 0111)
+                    lowest 4 bit: ToT
+        '''
 
+        ch_2nd_dataword = np.uint16(data_array['tot'][i]<<12 ^ moduleID<<8 ^ flag<<4 ^ np.uint8(data_array['relative_BCID'][i]))  
+        ch_hit_data.extend((channelID, ch_2nd_dataword))
+    return ch_hit_data
+
+@njit
 def decode_channelID(channelID):
     '''
-    converts channelID (0 to 26879, each value corresponds to one pixel of one FE) to column, row
+#     converts channelID (0 to 26879, each value corresponds to one pixel of one FE) to column, row
+    converts channelID to column and pixel. 16 bit uint: highest 7bit = column, lowest 9 bit = row
     input:
-        int16
-    returns tuple column(np.uint16), row(np.uint16)
+        uint16
+    returns tuple column(np.uint8), row(np.uint16)
     '''
 
-    row = np.uint16(0)
-    column = np.uint16(0)
-    if channelID == 0:
-        row = 0
-        column = 0
-        return column, row
-    column = channelID % 80
-    row = (channelID - 79) / 80
+#     row = np.uint16(0)
+#     column = np.uint16(0)
+#     if channelID == 0:
+#         row = 0
+#         column = 0
+#         return column, row
+#     column = channelID % 80
+    column = np.uint8(channelID>>9)
+    row=np.uint16(channelID ^ (column<<9))
+#     row = (channelID - 79) / 80
     return column, row
 
+@njit
+def decode_second_dataword(dataword):
+    '''
+    converts second dataword (16bit: 4 bit tot, 4bit moduleID, 4bit flags=0000, 4bit BCID) to single values
+    input:
+        int16
+    returns:
+        tuple (tot(np.uint8), moduleID(np.uint8), flags(np.uint8), rel_BCID(np.uint8)) each value is only 4bit but 8bit is smallest dtype
+    '''
 
-            
+    tot = np.uint8(dataword>>12)
+    moduleID = np.uint8(dataword ^ (tot<<12)>>8)
+    flag = np.uint8(dataword ^ (tot<<12 ^ moduleID<<8)>>4)
+    rel_BCID = np.uint8(dataword ^ (tot<<12 ^ moduleID<<8 ^ flag<<4))
+    
+    return tot, moduleID, flag, rel_BCID
+
             
 class DataConverter(object):
 
@@ -117,13 +188,13 @@ class DataConverter(object):
             self.interpreter.reset()
             self.n_readout = 0
 
-    @profile
+
     def analyze_raw_data(self, raw_data):
         self.interpreter.interpret_raw_data(raw_data)
-#         self.interpreter.get_hits()
+        
 
-#     @profile
-#     def process_data(self, data_array, moduleID):
+
+#     def process_data(self,data_array, moduleID):
 #         '''
 #         each hit is converted to two 16bit datawords, 1st word is pixel of
 #         FE, second word is relBCID + number of FE + tot
@@ -143,8 +214,8 @@ class DataConverter(object):
 #                 ('service_record', '<u4'),
 #                 ('event_status', '<u2')]
 #         '''
-#         self.ch_hit_data = []
-#  
+#         ch_hit_data = []
+#   
 # #         if data_array.shape[0] != 0:
 # #             bitwords = data_array[['row','column']].copy()
 # #             print bitwords.dtype
@@ -154,11 +225,11 @@ class DataConverter(object):
 # #             print bitwords['row']
 # #             bitwords['column'] = np.binary_repr(bitwords['column'][:],widht=7)
 # #             channelID.extend([bitwords['row']<<7 ^ bitwords['column']])
-# 
+#  
 #         for i in range(data_array.shape[0]):
 #             row = data_array['row'][i]
 #             column = data_array['column'][i]
-#              
+#               
 #             '''
 #             channelID = np.uint16(80*column + row) counts from left to right and from bottom to top
 #             eg: channelID =  1 : row = 0, column =1,
@@ -168,6 +239,7 @@ class DataConverter(object):
 #             use function decode_channelID to decode
 #             '''
 #     #             channelID = struct.pack('H', np.uint16(80*column + row)) # unique ID for each pixel on FE.
+#             channelID = np.uint16(80*column + row)
 #             '''
 #             channelID: 16 bit word
 #                         first 7 bit: column
@@ -178,29 +250,57 @@ class DataConverter(object):
 #                         third 4 bit: moduleID (0-7 => 0000 to 0111)
 #                         lowest 4 bit: ToT
 #             '''
-#             channelID = bitarray()
-#             channelID.extend(np.binary_repr(row<<7 ^ column, width=16))
-#             ch_2nd_dataword = bitarray()
-#             ch_2nd_dataword.extend(np.binary_repr(data_array['tot'][i]<<12 ^ moduleID<<8 ^ 0<<4 ^ data_array['relative_BCID'][i],width = 16))
-#          
-#             self.ch_hit_data.extend((channelID, ch_2nd_dataword))
+# #             channelID = bitarray()
+# #             channelID.extend(np.binary_repr(row<<7 ^ column, width=16))
+# #             ch_2nd_dataword = bitarray()
+# #             ch_2nd_dataword.extend(np.binary_repr(data_array['tot'][i]<<12 ^ moduleID<<8 ^ 0<<4 ^ data_array['relative_BCID'][i],width = 16))
+#             ch_2nd_dataword = np.uint16(np.uint8(7*moduleID + data_array['tot'][i])<<8 ^ np.uint8(data_array['relative_BCID'][i]))
+#           
+#             ch_hit_data.extend((channelID, ch_2nd_dataword))
 
-    @profile
-    def process_data(self, data_array, moduleID):
-        self.ch_hit_data = hit_to_binary(data_array[['row','column','tot','relative_BCID']].copy(), moduleID)
+#     @profile
+#     def process_data(self, data_array, moduleID):
+#         '''
+#         each hit is converted to two 16bit datawords, 1st word is pixel of
+#         FE, second word is relBCID + number of FE + tot
+#         --------------
+#         Input:
+#             moduleID: int, number of module in readout thread, to be determined from meta data
+#             data_array: numpy array with interpreted hit data, dtypes as following
+#                 [('event_number', '<i8'),
+#                 ('trigger_number', '<u4'),
+#                 ('trigger_time_stamp', '<u4'), 
+#                 ('relative_BCID', 'u1'),
+#                 ('LVL1ID', '<u2'),
+#                 ('column', 'u1'),
+#                 ('row', '<u2'), 
+#                 ('tot', 'u1'),
+#                 ('BCID', '<u2'),
+#                 ('TDC', '<u2'), 
+#                 ('TDC_time_stamp', 'u1'), 
+#                 ('trigger_status', 'u1'),
+#                 ('service_record', '<u4'),
+#                 ('event_status', '<u2')]
+#         ------------------
+#         output:
+#             self.ch_hit_data: list of bitarrays with converted hit datawords
+#         '''
+#         
+#         self.ch_hit_data = hit_to_binary(data_array[['row','column','tot','relative_BCID']].copy(), moduleID)
 
 
-    @profile
+#     @profile
     def build_header(self, n_hits, partitionID, cycleID, trigger_timestamp, bcids=15, flag=0):
         """
         builds data frame header from input information,
         python variables have to be converted to bitstrings.
 
         input variables:
-        n_hits: int , used to calculate length of data frame, 1 hit = 4 byte
-        partitionID: int, fixed for each MMC3 board
-        cycleID: int, see below, provided by run control
-        trigger_timestamp: int, used as frameTime (see below)
+        -----------------
+            n_hits: int , used to calculate length of data frame, 1 hit = 4 byte
+            partitionID: int, fixed for each MMC3 board
+            cycleID: int, see below, provided by run control
+            trigger_timestamp: int, used as frameTime (see below)
 
         format:
             size (2 byte): length of data frame in bytes including header
@@ -217,6 +317,7 @@ class DataConverter(object):
 #         data_header = struct.unpack(struct.pack('HHIIB', n_hits * 4 + 16, partitionID, cycleID, trigger_timestamp, "{:4b}".format(bcids) << 4))
         self.data_header = bitarray()
         self.data_header.extend(np.binary_repr(n_hits*4*16<<112 ^ partitionID<<96 ^ cycleID<<64 ^ trigger_timestamp<<32 ^ bcids<<16 ^ flag, width=128))
+
 
         print "data header:" , self.data_header
 
@@ -255,9 +356,9 @@ class DataConverter(object):
                         data_array = np.frombuffer(buf, dtype=dtype).reshape(shape)
                         event_array = build_events_from_raw_data(data_array)
                         self.analyze_raw_data(data_array)
-                        self.process_data(self.interpreter.get_hits(), moduleID=2)
+                        self.ch_hit_data = process_data_numba(self.interpreter.get_hits(), moduleID=2)
                         self.build_header(
-                            n_hits=len(self.ch_hit_data)/2, partitionID=3, cycleID=self.cycle_ID(), trigger_timestamp=54447,)
+                            n_hits=len(self.ch_hit_data)/2, partitionID=3, cycleID=self.cycle_ID(), trigger_timestamp=54447,) # self.ch_hit_data
         
              
     def stop(self):
@@ -292,5 +393,6 @@ if __name__ == '__main__':
         socket_addr = args[0]
     else:
         parser.error("incorrect number of arguments")
-         
+
     DataConverter(socket_addr=socket_addr)
+
