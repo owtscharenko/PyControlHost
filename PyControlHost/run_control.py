@@ -3,8 +3,8 @@ import sys
 import time
 import logging
 import datetime
-from threading import Event, Lock
-from optparse import OptionParser
+# from threading import Event, Lock
+# from optparse import OptionParser
 
 import zmq
 import numpy as np
@@ -17,14 +17,12 @@ class run_control():
     def __init__(self):
         logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - [%(levelname)-8s] (%(threadName)-10s) %(message)s")
         self.status = 0
-        pass
+
         
     def cycle_ID(self):
         # counts in 0.2s steps from 08. April 2015
         start_date = datetime.datetime(2015, 04, 8, 00, 00)
         return np.uint32((datetime.datetime.now() - start_date).total_seconds()*5) 
-    
-    
     
 
 class ch_communicator():
