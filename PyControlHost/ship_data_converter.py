@@ -49,6 +49,7 @@ def transfer_file(file_name, socket):  # Function to open the raw data file and 
             progress_bar.update(index)
         progress_bar.finish()
         
+        
 @njit             
 def process_data_numba(data_array, moduleID, flag=0):
     '''
@@ -101,14 +102,17 @@ def process_data_numba(data_array, moduleID, flag=0):
         ch_hit_data.extend((channelID, ch_2nd_dataword))
     return ch_hit_data
 
+
 @njit
 def decode_channelID(channelID):
-    '''
+
 #     converts channelID (0 to 26879, each value corresponds to one pixel of one FE) to column, row
+    '''
     converts channelID to column and pixel. 16 bit uint: highest 7bit = column, lowest 9 bit = row
     input:
         uint16
-    returns tuple column(np.uint8), row(np.uint16)
+    returns: 
+        tuple column(np.uint8), row(np.uint16)
     '''
 
 #     row = np.uint16(0)
@@ -123,10 +127,11 @@ def decode_channelID(channelID):
 #     row = (channelID - 79) / 80
     return column, row
 
+
 @njit
 def decode_second_dataword(dataword):
     '''
-    converts second dataword (16bit: 4 bit tot, 4bit moduleID, 4bit flags=0000, 4bit BCID) to single values
+    converts second dataword (16bit: highest 4 bit(16-13) tot, bit 12-9 moduleID, bit 8-5 flags=0000, lowest 4bit (4-1) BCID) to single values
     input:
         int16
     returns:

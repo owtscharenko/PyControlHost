@@ -101,7 +101,7 @@ def hit_to_binary(np.ndarray[ch_hit_info,ndim=1] data_array, int moduleID):
     ch_hit_data = []
     for i in range(data_array.shape[0]):
         channelID = bitarray()
-#         second_word = bitarray()
+        second_word = bitarray()
         channelID.extend(binary_repr(bit_or(shift_left(data_array['row'][i],7), data_array['column'][i]),width=16))
 #         print binary_repr(shift_left(data_array['row'][i],7))
 #         print bit_or(shift_left(data_array['row'][i],7), data_array['column'][i])
