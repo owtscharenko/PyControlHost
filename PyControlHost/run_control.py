@@ -61,6 +61,7 @@ class ch_communicator():
     
     def send_data(self, data):
         length = sys.getsizeof(data)
+        logging.info('sending data package with %s byte' % length)
         self.status = ch.send_fulldata('DATA', data, length)
         if self.status < 0:
             raise RuntimeError('sending package failed')
