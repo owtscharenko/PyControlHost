@@ -19,7 +19,7 @@ from build_binrep import hit_to_binary
 from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
 from pybar_fei4_interpreter.data_histograming import PyDataHistograming
 from pybar.daq.readout_utils import build_events_from_raw_data, is_trigger_word, get_col_row_tot_array_from_data_record_array
-from PyControlHost.run_control import run_control
+from PyControlHost.run_control import run_control, ch_communicator
 
 
 from subprocess import Popen
@@ -70,33 +70,25 @@ def process_data_numba(data_array, moduleID, flag=0):
             ('trigger_status', 'u1'),
             ('service_record', '<u4'),
             ('event_status', '<u2')]
+            
+
+            channelID: 16 bit word From MSB(left) to LSB(right)
+                        highest 7 bit: column
+                        following 9 bit: row
+            ch_2nd_dataword: 16 bit word. From MSB(left) to LSB(right)
+                        highest 4 bit: ToT
+                        second 4 bit: moduleID (0-7 => 0000 to 0111)
+                        third 4 bit:  0000 (in-BCID time res. can not be provided) used for flgas
+                        lowest 4 bit: BCID
+
     '''
     ch_hit_data = []
 
     for i in range(data_array.shape[0]):
         row = data_array['row'][i]
         column = data_array['column'][i]
-          
-        '''
-        channelID = np.uint16(80*column + row) counts from left to right and from bottom to top
-        eg: channelID =  1 : row = 0, column =1,
-            channelID =  2 : row = 0, column = 2
-            channelID = 81 : row = 1, column = 1
-            channelID = 162: row = 2, column = 2
-        use function decode_channelID to decode
-        '''
-
+            
         channelID = np.uint16(column<<9 ^ row)
-        '''
-        channelID: 16 bit word
-                    first 7 bit: column
-                    following 9 bit: row
-        ch_2nd_dataword: 16 bit word. From MSB(left) to LSB(right)
-                    highest 4 bit: BCID
-                    second 4 bit: 0000 (in-BCID time res. can not be provided)
-                    third 4 bit: moduleID (0-7 => 0000 to 0111)
-                    lowest 4 bit: ToT
-        '''
 
         ch_2nd_dataword = np.uint16(data_array['tot'][i]<<12 ^ moduleID<<8 ^ flag<<4 ^ np.uint8(data_array['relative_BCID'][i]))  
         ch_hit_data.extend((channelID, ch_2nd_dataword))
@@ -195,7 +187,7 @@ class DataConverter(object):
 
 
     def analyze_raw_data(self, raw_data):
-        self.interpreter.interpret_raw_data(raw_data)
+        return self.interpreter.interpret_raw_data(raw_data)
         
 
 
@@ -320,8 +312,10 @@ class DataConverter(object):
 #         cycleID) + "{:32b}".format(trigger_timestamp) + "{:04b}".format(bcids) +
 #             "{:04b}".format(flag)
 #         data_header = struct.unpack(struct.pack('HHIIB', n_hits * 4 + 16, partitionID, cycleID, trigger_timestamp, "{:4b}".format(bcids) << 4))
-        self.data_header = bitarray()
-        self.data_header.extend(np.binary_repr(n_hits*4*16<<112 ^ partitionID<<96 ^ cycleID<<64 ^ trigger_timestamp<<32 ^ bcids<<16 ^ flag, width=128))
+
+        self.data_header = (n_hits*4+16)<<112 ^ partitionID<<96 ^ cycleID<<64 ^ trigger_timestamp<<32 ^ bcids<<16 ^ flag
+#         self.data_header = bitarray()
+#         self.data_header.extend(np.binary_repr(n_hits*4*16<<112 ^ partitionID<<96 ^ cycleID<<64 ^ trigger_timestamp<<32 ^ bcids<<16 ^ flag, width=128))
 
 
         print "data header:" , self.data_header
@@ -359,13 +353,17 @@ class DataConverter(object):
                         dtype = meta_data.pop('dtype')
                         shape = meta_data.pop('shape')
                         data_array = np.frombuffer(buf, dtype=dtype).reshape(shape)
-                        event_array = build_events_from_raw_data(data_array)
+
                         self.analyze_raw_data(data_array)
-                        self.ch_hit_data = process_data_numba(self.interpreter.get_hits(), moduleID=2)
-                        self.build_header(
-                            n_hits=len(self.ch_hit_data)/2, partitionID=3, cycleID=self.cycle_ID(), trigger_timestamp=54447,) # self.ch_hit_data
-        
-             
+                        hits = self.interpreter.get_hits()
+                        _, n_events = np.unique(hits['event_number'], return_index = True) # count number of events in arrayx
+
+                        for event_table in np.array_split(hits, n_events):
+                            self.ch_hit_data = process_data_numba(event_table, moduleID=2) # interpreted data comes in chunks of several COMPLETE events.
+                            self.build_header(
+                                n_hits=len(self.ch_hit_data)/2, partitionID=3, cycleID=self.cycle_ID(), trigger_timestamp=54447,) # each event needs a frame header
+                            CH.send_data(np.array([self.data_header] + self.ch_hit_data))
+                            
     def stop(self):
         self._stop_readout.set()
 
@@ -398,6 +396,6 @@ if __name__ == '__main__':
         socket_addr = args[0]
     else:
         parser.error("incorrect number of arguments")
-
+    CH = ch_communicator()
     DataConverter(socket_addr=socket_addr)
 
