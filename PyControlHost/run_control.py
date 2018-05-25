@@ -76,7 +76,7 @@ class run_control():
                                                      target = ship_data_converter.DataConverter, args=(self.socket_addr))
                         converter.start()
                         scan = threading.Thread(name = 'ext. trigger scan', target = self.mngr.run_run(), 
-                                                args = [ExtTriggerScanShiP(run_number=run_number), None, {'scan_timeout': 86400}]) # TODO: how to set pybar run number from here ?
+                                                args = [ExtTriggerScanShiP(), None, {'scan_timeout': 86400}]) # TODO: how to set pybar run number from here ?
 
                         scan.start()
                         ch_communicator.send_done('SoR',self.partitionID, self.status) # TODO: send nevents instead of self.status
