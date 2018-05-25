@@ -1,54 +1,16 @@
-import sys
-import time
 from threading import Event, Lock
 from optparse import OptionParser
-import tables as tb
-import progressbar
-from bitarray import bitarray
-import array
 import zmq
 import numpy as np
 import datetime
-from numba import njit,jit
-import timeit
-import cProfile, pstats
-import pprint
-
+from numba import njit
+import cProfile
 
 from build_binrep import hit_to_binary
 from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
 from pybar_fei4_interpreter.data_histograming import PyDataHistograming
-from pybar.daq.readout_utils import build_events_from_raw_data, is_trigger_word, get_col_row_tot_array_from_data_record_array
 from PyControlHost.run_control import run_control, ch_communicator
 
-
-from subprocess import Popen
-from pybar.daq.fei4_raw_data import send_data
-
-
-def transfer_file(file_name, socket):  # Function to open the raw data file and sending the readouts periodically
-    with tb.open_file(file_name, mode="r") as in_file_h5:
-        meta_data = in_file_h5.root.meta_data[:]
-        raw_data = in_file_h5.root.raw_data[:]
-        try:
-            scan_parameter_names = in_file_h5.root.scan_parameters.dtype.names
-        except tb.NoSuchNodeError:
-            scan_parameter_names = None
-        progress_bar = progressbar.ProgressBar(widgets=['', progressbar.Percentage(), ' ', progressbar.Bar(marker='*', left='|', right='|'), ' ', progressbar.AdaptiveETA()], maxval=meta_data.shape[0], term_width=80)
-        progress_bar.start()
-        for index, (index_start, index_stop) in enumerate(np.column_stack((meta_data['index_start'], meta_data['index_stop']))):
-            data = []
-            data.append(raw_data[index_start:index_stop])
-            data.extend((float(meta_data[index]['timestamp_start']), float(meta_data[index]['timestamp_stop']), int(meta_data[index]['error'])))
-            if scan_parameter_names is not None:
-                scan_parameter_value = [int(value) for value in in_file_h5.root.scan_parameters[index]]
-                send_data(socket, data, scan_parameters=dict(zip(scan_parameter_names, scan_parameter_value)))
-            else:
-                send_data(socket, data)
-            time.sleep(meta_data[index]['timestamp_stop'] - meta_data[index]['timestamp_start'])
-            progress_bar.update(index)
-        progress_bar.finish()
-        
         
 @njit             
 def process_data_numba(data_array, moduleID, flag=0):
@@ -83,7 +45,7 @@ def process_data_numba(data_array, moduleID, flag=0):
 
     '''
     ch_hit_data = []
-
+    
     for i in range(data_array.shape[0]):
         row = data_array['row'][i]
         column = data_array['column'][i]
@@ -93,6 +55,36 @@ def process_data_numba(data_array, moduleID, flag=0):
         ch_2nd_dataword = np.uint16(data_array['tot'][i]<<12 ^ moduleID<<8 ^ flag<<4 ^ np.uint8(data_array['relative_BCID'][i]))  
         ch_hit_data.extend((channelID, ch_2nd_dataword))
     return ch_hit_data
+
+
+def build_header(n_hits, partitionID, cycleID, trigger_timestamp, bcids=15, flag=0):
+    """
+    builds data frame header from input information,
+    python variables have to be converted to bitstrings.
+
+    input variables:
+    -----------------
+        n_hits: int , used to calculate length of data frame, 1 hit = 4 byte
+        partitionID: int, fixed for each MMC3 board
+        cycleID: int, see below, provided by run control
+        trigger_timestamp: int, used as frameTime (see below)
+
+    format:
+        size (2 byte): length of data frame in bytes including header
+        partitionID (2 byte) = 0000 to 0002
+        cycleIdentifier (4 byte): time of spill in SHiP time format: 0.2 seconds steps since the 8 April 2015
+        frameTime (4 byte) = trigger_timestamp:  start of trigger window relative to SoC in 25ns steps
+        timeExtent (2 byte) = relBCID : length of the trigger window in 25ns steps
+        flags (2 byte) = empty for now
+
+    """
+    
+    data_header = (n_hits*4+16)<<112 ^ partitionID<<96 ^ cycleID<<64 ^ trigger_timestamp<<32 ^ bcids<<16 ^ flag # may not work as expected: getsizeof(2**128) = 44 byte
+#     data_header = [(n_hits*4+16)<<48 ^ partitionID<<32 ^ cycleID , trigger_timestamp<<32 ^ bcids<<16 ^ flag] # two 64bit int may be better than one 128 bit int
+#         self.data_header = bitarray()
+#         self.data_header.extend(np.binary_repr(n_hits*4*16<<112 ^ partitionID<<96 ^ cycleID<<64 ^ trigger_timestamp<<32 ^ bcids<<16 ^ flag, width=128))
+
+    return data_header
 
 
 @njit
@@ -142,7 +134,6 @@ class DataConverter(object):
 
     def __init__(self, socket_addr):
         self.connect(socket_addr)
-#         self.integrate_readouts = 1
         self.n_readout = 0
         self._stop_readout = Event()
         self.setup_raw_data_analysis()
@@ -161,7 +152,6 @@ class DataConverter(object):
         self.interpreter = PyDataInterpreter()
         self.interpreter.create_empty_event_hits(True)
         self.interpreter.set_trigger_data_format(1)
-#         self.interpreter.set_max_trigger_number(2 ** 31 - 1)  # 31 bit?
         self.interpreter.align_at_trigger(True)
         self.interpreter.set_warning_output(False)
         self.interpreter.set_FEI4B(True)
@@ -175,13 +165,8 @@ class DataConverter(object):
         self.socket_pull.connect(self.socket_addr)
 
 
-    def on_set_integrate_readouts(self, value):
-        self.integrate_readouts = value
-
-
     def reset(self):
         with self.reset_lock:
-            self.histogram.reset()
             self.interpreter.reset()
             self.n_readout = 0
 
@@ -255,7 +240,7 @@ class DataConverter(object):
 #           
 #             ch_hit_data.extend((channelID, ch_2nd_dataword))
 
-#     @profile
+
 #     def process_data(self, data_array, moduleID):
 #         '''
 #         each hit is converted to two 16bit datawords, 1st word is pixel of
@@ -286,41 +271,6 @@ class DataConverter(object):
 #         self.ch_hit_data = hit_to_binary(data_array[['row','column','tot','relative_BCID']].copy(), moduleID)
 
 
-#     @profile
-    def build_header(self, n_hits, partitionID, cycleID, trigger_timestamp, bcids=15, flag=0):
-        """
-        builds data frame header from input information,
-        python variables have to be converted to bitstrings.
-
-        input variables:
-        -----------------
-            n_hits: int , used to calculate length of data frame, 1 hit = 4 byte
-            partitionID: int, fixed for each MMC3 board
-            cycleID: int, see below, provided by run control
-            trigger_timestamp: int, used as frameTime (see below)
-
-        format:
-            size (2 byte): length of data frame in bytes including header
-            partitionID (2 byte) = 0000 to 0002
-            cycleIdentifier (4 byte): time of spill in SHiP time format: 0.2 seconds steps since the 8 April 2015
-            frameTime (4 byte) = trigger_timestamp:  start of trigger window relative to SoC in 25ns steps
-            timeExtent (2 byte) = relBCID : length of the trigger window in 25ns steps
-            flags (2 byte) = empty for now
-
-        """
-#         data_header = "{:16b}".format(n_hits * 4 + 16) + "{:16b}".format(partitionID) + "{:32b}".format(
-#         cycleID) + "{:32b}".format(trigger_timestamp) + "{:04b}".format(bcids) +
-#             "{:04b}".format(flag)
-#         data_header = struct.unpack(struct.pack('HHIIB', n_hits * 4 + 16, partitionID, cycleID, trigger_timestamp, "{:4b}".format(bcids) << 4))
-
-        self.data_header = (n_hits*4+16)<<112 ^ partitionID<<96 ^ cycleID<<64 ^ trigger_timestamp<<32 ^ bcids<<16 ^ flag
-#         self.data_header = bitarray()
-#         self.data_header.extend(np.binary_repr(n_hits*4*16<<112 ^ partitionID<<96 ^ cycleID<<64 ^ trigger_timestamp<<32 ^ bcids<<16 ^ flag, width=128))
-
-
-        print "data header:" , self.data_header
-
-
     def build_event_frame(self, data_header, hit_data):
         """
         builds frame to be sent to dispatcher
@@ -333,8 +283,9 @@ class DataConverter(object):
         event_frame.extend((data_header,hit_data))
         return event_frame
 
-
+#     @profile
     def run(self):
+       
         while(not self._stop_readout.wait(0.01)):  # use wait(), do not block here
             with self.reset_lock:
                 try:
@@ -353,38 +304,22 @@ class DataConverter(object):
                         dtype = meta_data.pop('dtype')
                         shape = meta_data.pop('shape')
                         data_array = np.frombuffer(buf, dtype=dtype).reshape(shape)
-
+                        pr.enable()
                         self.analyze_raw_data(data_array)
                         hits = self.interpreter.get_hits()
-                        _, n_events = np.unique(hits['event_number'], return_index = True) # count number of events in arrayx
-
-                        for event_table in np.array_split(hits, n_events):
-                            self.ch_hit_data = process_data_numba(event_table, moduleID=2) # interpreted data comes in chunks of several COMPLETE events.
-                            self.build_header(
-                                n_hits=len(self.ch_hit_data)/2, partitionID=3, cycleID=self.cycle_ID(), trigger_timestamp=54447,) # each event needs a frame header
-                            CH.send_data(np.array([self.data_header] + self.ch_hit_data))
-                            
+                        _, n_events = np.unique(hits['event_number'], return_index = True) # count number of events in array
+                        for event_table in np.array_split(hits, n_events)[1:]: # split hit array by events. 1st list entry is empty
+                            self.ch_hit_data = process_data_numba(event_table, moduleID=2)
+                            self.data_header = [build_header(
+                                n_hits=len(self.ch_hit_data)/2, partitionID=3, cycleID=run_control.cycle_ID(), trigger_timestamp=54447)] # each event needs a frame header
+                            CH.send_data(np.ascontiguousarray(self.data_header + self.ch_hit_data))
+        
+        
     def stop(self):
         self._stop_readout.set()
 
 
 if __name__ == '__main__':
-
-#     # Open th online monitor
-#     socket_addr = "tcp://127.0.0.1:5678"
-# #     Popen(["python", "../../pybar/online_monitor.py", socket_addr])  # if this call fails, comment it out and start the script manually
-#     # Prepare socket
-#     context = zmq.Context()
-#     socket = context.socket(zmq.PUB)
-#     socket.bind(socket_addr)
-#     time.sleep(1)
-#     # Transfer file to socket
-#     while transfer_file("/media/data/SHiP/charm_exp_2018/test_data_converter/19_module_0_ext_trigger_scan.h5", socket=socket):
-#         DataConverter(socket_addr=socket_addr)
-#     # Clean up
-#     socket.close()
-#     context.term()
-    
    
     usage = "Usage: %prog ADDRESS"
     description = "ADDRESS: Remote address of the sender (default: tcp://127.0.0.1:5678)."
@@ -396,6 +331,15 @@ if __name__ == '__main__':
         socket_addr = args[0]
     else:
         parser.error("incorrect number of arguments")
+     
+#     rc = run_control()
     CH = ch_communicator()
-    DataConverter(socket_addr=socket_addr)
+    pr = cProfile.Profile()
+     
+    try:
+        DataConverter(socket_addr=socket_addr)
+    except (KeyboardInterrupt, SystemExit):
+        print "keyboard interrupt"
+        pr.disable()
+        pr.print_stats(sort='ncalls')
 
