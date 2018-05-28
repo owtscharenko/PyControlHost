@@ -5,11 +5,14 @@ import numpy as np
 import datetime
 from numba import njit
 import cProfile
+import threading
+from threading import Thread
+import logging
 
 from build_binrep import hit_to_binary
 from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
 from pybar_fei4_interpreter.data_histograming import PyDataHistograming
-from PyControlHost.run_control import run_control, ch_communicator
+from run_control import run_control, ch_communicator
 
         
 @njit             
@@ -130,16 +133,19 @@ def decode_second_dataword(dataword):
     return tot, moduleID, flag, rel_BCID
 
             
-class DataConverter(object):
+class DataConverter(Thread):
 
     def __init__(self, socket_addr):
+        Thread.__init__(self)
         self.connect(socket_addr)
         self.n_readout = 0
         self._stop_readout = Event()
         self.setup_raw_data_analysis()
         self.reset_lock = Lock()
         self.kill_received = False
-        self.run()
+        self.ch = ch_communicator()
+        self.total_events = 0
+#         self.run()
         
 
     def cycle_ID(self):
@@ -163,12 +169,13 @@ class DataConverter(object):
         self.socket_pull = self.context.socket(zmq.SUB)  # subscriber
         self.socket_pull.setsockopt(zmq.SUBSCRIBE, '')  # do not filter any data
         self.socket_pull.connect(self.socket_addr)
-
+        logging.info('data converter connected to %s' % socket_addr)
 
     def reset(self):
         with self.reset_lock:
             self.interpreter.reset()
             self.n_readout = 0
+            self.total_events = 0
 
 
     def analyze_raw_data(self, raw_data):
@@ -285,8 +292,7 @@ class DataConverter(object):
 
 #     @profile
     def run(self):
-       
-        while(not self._stop_readout.wait(0.01)):  # use wait(), do not block here
+        while (not self._stop_readout.wait(0.01)):  # use wait(), do not block here
             with self.reset_lock:
                 try:
                     meta_data = self.socket_pull.recv_json(flags=zmq.NOBLOCK)
@@ -296,7 +302,6 @@ class DataConverter(object):
                     name = meta_data.pop('name')
                     if name =='Filename':
                         print meta_data.pop('conf')
-                         
                     elif name == 'ReadoutData':
                         data = self.socket_pull.recv()
                         # reconstruct numpy array
@@ -304,19 +309,21 @@ class DataConverter(object):
                         dtype = meta_data.pop('dtype')
                         shape = meta_data.pop('shape')
                         data_array = np.frombuffer(buf, dtype=dtype).reshape(shape)
-                        pr.enable()
+    #                         pr.enable()
                         self.analyze_raw_data(data_array)
                         hits = self.interpreter.get_hits()
                         _, n_events = np.unique(hits['event_number'], return_index = True) # count number of events in array
                         for event_table in np.array_split(hits, n_events)[1:]: # split hit array by events. 1st list entry is empty
                             self.ch_hit_data = process_data_numba(event_table, moduleID=2)
-                            self.data_header = [build_header(
-                                n_hits=len(self.ch_hit_data)/2, partitionID=3, cycleID=run_control.cycle_ID(), trigger_timestamp=54447)] # each event needs a frame header
-                            CH.send_data(np.ascontiguousarray(self.data_header + self.ch_hit_data))
-        
-        
+                            self.data_header = [build_header( # each event needs a frame header
+                                n_hits=len(self.ch_hit_data)/2, partitionID=3, cycleID=123456789, trigger_timestamp=54447)] #TODO: get trigger_timestamp and cycleID.
+                            self.ch.send_data(np.ascontiguousarray(self.data_header + self.ch_hit_data)) 
+                        self.total_events += n_events.shape[0]
+#                         logging.info('total events %s' % self.total_events)
+                        
     def stop(self):
         self._stop_readout.set()
+        logging.info('stopping converter')
 
 
 if __name__ == '__main__':
@@ -332,7 +339,6 @@ if __name__ == '__main__':
     else:
         parser.error("incorrect number of arguments")
      
-#     rc = run_control()
     CH = ch_communicator()
     pr = cProfile.Profile()
      
