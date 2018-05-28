@@ -31,11 +31,11 @@ def init_disp_2way(const char *host, const char *subscrdata, const char *subscrc
 def subscribe(const char *id):
     return my_id(id)
 
-def check_head(char *tag, cnp.ndarray[cnp.int8_t, ndim=1] size):
-    return check_head(tag, size)
+def get_head(char *tag, cnp.ndarray[cnp.int8_t, ndim=1] size):
+    return check_head(tag, <int*>size.data)
 
-def wait_head(char *tag, cnp.ndarray[cnp.int8_t, ndim=1] size):
-    return wait_head(tag, size)
+def get_head_wait(char *tag, cnp.ndarray[cnp.int8_t, ndim=1] size):
+    return wait_head(tag, <int*>size.data)
  
 def send_data(const char *tag, cnp.ndarray[cnp.int8_t, ndim=1] buf, int size, cnp.ndarray[cnp.int8_t, ndim=1] pos): # remove casting of numpy array!
     return put_data(tag, <const void *>buf.data, size, <int*>pos.data)
