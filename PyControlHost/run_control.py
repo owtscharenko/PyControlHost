@@ -66,7 +66,6 @@ class run_control():
                         command = cmd
                     if command in self.commands and self.ch_com.status >=0:
                         self.ch_com.send_ack(tag='DAQACK',msg = '%s %04X %s' %(command, int(self.partitionID,16), self.socket_addr)) # acknowledge command
-    #                     ch.send_fullstring('DAQACK',' %s %s %s' %(cmd, self.partitionID, self.socket_addr))
                         if command == 'Enable': # enable detector partition
                             self.enable = True
                         elif command == 'Disable': #disable detector partition
@@ -77,19 +76,18 @@ class run_control():
                             else:
                                 run_number = None
                             converter = ship_data_converter.DataConverter(self.converter_socket_addr)
-                            converter.setName('ship data converter')
+                            converter.setName('DataConverter')
 #                             converter = threading.Thread(name = 'ship data converter', 
 #                                                          target = ship_data_converter.DataConverter,kwargs = {"socket_addr": self.converter_socket_addr})
                             converter.start()
-                            scan = threading.Thread(name = 'ext. trigger scan', target = self.mngr.run_run,
+                            scan = threading.Thread(name = 'ExtTriggerScanShiP', target = self.mngr.run_run,
                                                     kwargs = {"run": ExtTriggerScanShiP, "run_conf" : {'scan_timeout': 86400}}) # TODO: how to set pyBAR run number from here ?
                             scan.start()
                             self.ch_com.send_done('SoR',int(self.partitionID,16), self.status ) 
                             
                         elif command == 'EoR': # stop existing pyBAR ExtTriggerScanShiP
-    #                         self.mngr.run.stop(msg='DAQ command: EoR')
                             logging.info('recieved EoR, stopping scan')
-                            scan.join()
+                            scan.join() # TODO: check how to properly stop pyBAR RunManager
                             self.ch_com.send_done('EoR',int(self.partitionID,16), self.status)
                         elif command == 'SoS': # new spill. trigger counter will be reset by hardware signal. The software command triggers an empty header
                             if len(cmd) > 1:
