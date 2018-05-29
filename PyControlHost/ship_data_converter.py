@@ -172,7 +172,9 @@ class DataConverter(Thread):
         logging.info('data converter connected to %s' % socket_addr)
 
 
-    def reset(self):
+    def reset(self,msg=None):
+        if msg:
+            logging.info(msg)
         with self.reset_lock:
             self.interpreter.reset()
             self.n_readout = 0
@@ -197,6 +199,7 @@ class DataConverter(Thread):
 
 #     @profile
     def run(self):
+        logging.info('DataConverter running and accepting RAWDATA')
         while (not self._stop_readout.wait(0.01)):  # use wait(), do not block here
             with self.reset_lock:
                 try:

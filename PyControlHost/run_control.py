@@ -4,7 +4,7 @@ import time
 import logging
 import datetime
 import threading
-from threading import Event, Lock
+from threading import Event, Lock, current_thread, Thread
 from optparse import OptionParser
 
 import zmq
@@ -23,6 +23,7 @@ class run_control():
         self.enabled = True
         self.socket_addr = dispatcher_addr
         self.converter_socket_addr = converter_addr
+        self.pybar_conf = configuration
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - [%(levelname)-8s] (%(threadName)-10s) %(message)s')
         self.commands = {'SoR','EoR','SoS','EoS','Enable','Disable','Stop'}
         self.partitionID = '0X0802' # from 0800 to 0802 how to get this from scan instance?
@@ -54,66 +55,93 @@ class run_control():
         main loop for reception and execution of commands.
         starts threads corresponding to the command recieved.
         '''
-        while True:
-            if self.status >=0 and self.ch_com.status >=0 :
-                self.status = ch.get_head_wait('DAQCMD', self.ch_com.cmdsize)
+
+        try:
+            converter = ship_data_converter.DataConverter(self.converter_socket_addr)
+            converter.setName('DataConverter')
+            converter.Daemon = True
+            runmngr = RunManager(self.pybar_conf)
+#             scan = threading.Thread(name = 'ExtTriggerScanShiP', target = self.mngr.run_run,
+#                                     kwargs = {"run": ExtTriggerScanShiP, "run_conf" : {'scan_timeout': 86400}}) # TODO: how to set pyBAR run number from here ?
+            runmngr.Daemon = True
+            while True:
                 if self.status >=0 and self.ch_com.status >=0 :
-                    logging.info('recieved header')
-                    cmd = self.ch_com.get_cmd() # recieved command contains command word [0] and additional info [1]... different for each case
-                    if len(cmd) > 1:
-                        command = cmd[0]
-                    elif len(cmd)==0 or len(cmd) ==1 :
-                        command = cmd
-                    if command in self.commands and self.ch_com.status >=0:
-                        self.ch_com.send_ack(tag='DAQACK',msg = '%s %04X %s' %(command, int(self.partitionID,16), self.socket_addr)) # acknowledge command
-                        if command == 'Enable': # enable detector partition
-                            self.enable = True
-                        elif command == 'Disable': #disable detector partition
-                            self.enabled = False
-                        elif command == 'SoR': # Start new pyBAR ExtTriggerScanShiP.
-                            if len(cmd) > 1:
-                                run_number = cmd[1]
-                            else:
-                                run_number = None
-                            converter = ship_data_converter.DataConverter(self.converter_socket_addr)
-                            converter.setName('DataConverter')
-#                             converter = threading.Thread(name = 'ship data converter', 
-#                                                          target = ship_data_converter.DataConverter,kwargs = {"socket_addr": self.converter_socket_addr})
-                            converter.start()
-                            scan = threading.Thread(name = 'ExtTriggerScanShiP', target = self.mngr.run_run,
-                                                    kwargs = {"run": ExtTriggerScanShiP, "run_conf" : {'scan_timeout': 86400}}) # TODO: how to set pyBAR run number from here ?
-                            scan.start()
-                            self.ch_com.send_done('SoR',int(self.partitionID,16), self.status ) 
-                            
-                        elif command == 'EoR': # stop existing pyBAR ExtTriggerScanShiP
-                            logging.info('recieved EoR, stopping scan')
-                            scan.join() # TODO: check how to properly stop pyBAR RunManager
-                            self.ch_com.send_done('EoR',int(self.partitionID,16), self.status)
-                        elif command == 'SoS': # new spill. trigger counter will be reset by hardware signal. The software command triggers an empty header
-                            if len(cmd) > 1:
-                                cycleID = cmd[1]
-                            else:
-                                cycleID = self.cycle_ID()
-                            logging.info('recieved SoS header, cycleID = %s' % cycleID)
-    #                         if central_cycleID != self.cycle_ID():
-                            header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=cycleID, trigger_timestamp=0, bcids=0, flag=0)
-                            self.ch_com.send_data(self, header)
-                            self.ch_com.send_done('SoS',self.partitionID, converter.total_events) # TODO: make sure send done is called after last event is converted
-                        elif command == 'EoS': # trigger EoS header, sent after last event
-                            logging.info('recieved EoS, local cycleID:%s' % self.cycle_ID())
-                            header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=self.cycleID, trigger_timestamp=0, bcids=0, flag=0) # TODO: send EoS header after last event from spill
-                            self.ch_com.send_data(self, header)
-                            self.ch_com.send_done('EoS', self.partitionID, self.status)
-                        elif command == 'Stop':
-                            break
-                    else:
-                        logging.error('command=%s could not be identified' % cmd)
-                elif self.status < 0 :
-                    logging.error('header could not be recieved')
-            else:
-                self.status = -1
-                raise RuntimeError('undefined state')
+                    self.status = ch.get_head_wait('DAQCMD', self.ch_com.cmdsize)
+                    if self.status >=0 and self.ch_com.status >=0 :
+                        logging.info('recieved header')
+                        cmd = self.ch_com.get_cmd() # recieved command contains command word [0] and additional info [1]... different for each case
+                        if len(cmd) > 1:
+                            command = cmd[0]
+                        elif len(cmd)==0 or len(cmd) ==1 :
+                            command = cmd
+                        if command in self.commands and self.ch_com.status >=0:
+                            self.ch_com.send_ack(tag='DAQACK',msg = '%s %04X %s' %(command, int(self.partitionID,16), self.socket_addr)) # acknowledge command
+                            if command == 'Enable': # enable detector partition
+                                self.enable = True
+                            elif command == 'Disable': #disable detector partition
+                                self.enabled = False
+                            elif command == 'SoR': # Start new pyBAR ExtTriggerScanShiP.
+                                if len(cmd) > 1:
+                                    run_number = cmd[1]
+                                else:
+                                    run_number = None
+#                                 converter = ship_data_converter.DataConverter(self.converter_socket_addr)
+#                                 threads.append(converter)
+#                                 converter.setName('DataConverter')
+#                                 converter.Daemon = True
+    #                             converter = threading.Thread(name = 'ship data converter', 
+    #                                                          target = ship_data_converter.DataConverter,kwargs = {"socket_addr": self.converter_socket_addr})
+                                converter.start()
+                                joinmngr = runmngr.run_run(ExtTriggerScanSHiP, run_conf={'scan_timeout': 86400}, use_thread=True)
+                                joinmngr(timeout = 0.01)
+                                    
+#                                 scan = threading.Thread(name = 'ExtTriggerScanShiP', target = self.mngr.run_run,
+#                                                         kwargs = {"run": ExtTriggerScanShiP, "run_conf" : {'scan_timeout': 86400}}) # TODO: how to set pyBAR run number from here ?
+                                self.ch_com.send_done('SoR',int(self.partitionID,16), self.status ) 
+                                
+                            elif command == 'EoR': # stop existing pyBAR ExtTriggerScanShiP
+                                logging.info('recieved EoR command')
+                                if runmngr.current_run.__class__.__name__ == 'ExtTriggerScanSHiP':
+                                    runmngr.current_run.stop(msg='ExtTriggerScanSHiP') # TODO: check how to properly stop pyBAR RunManager
+                                else:
+                                    logging.error('recieved EoR command, but no ExtTriggerScanSHiP running')
+                                if converter.isAlive():
+                                    converter.reset(msg='resetting DataConverter') # reset interpreter and event counter
+                                    logging.info('DataConverter has been reset')
+                                else:
+                                    logging.error('recieved EoR command to reset converter, but no converter running')
+                                self.ch_com.send_done('EoR',int(self.partitionID,16), self.status)
+                            elif command == 'SoS': # new spill. trigger counter will be reset by hardware signal. The software command triggers an empty header
+                                if len(cmd) > 1:
+                                    cycleID = cmd[1]
+                                else:
+                                    cycleID = self.cycle_ID()
+                                logging.info('recieved SoS header, cycleID = %s' % cycleID)
+        #                         if central_cycleID != self.cycle_ID():
+                                header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=cycleID, trigger_timestamp=0, bcids=0, flag=0)
+                                self.ch_com.send_data(self, header)
+                                self.ch_com.send_done('SoS',self.partitionID, converter.total_events) # TODO: make sure send done is called after last event is converted
+                            elif command == 'EoS': # trigger EoS header, sent after last event
+                                logging.info('recieved EoS, local cycleID:%s' % self.cycle_ID())
+                                header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=self.cycleID, trigger_timestamp=0, bcids=0, flag=0) # TODO: send EoS header after last event from spill
+                                self.ch_com.send_data(self, header)
+                                self.ch_com.send_done('EoS', self.partitionID, self.status)
+                            elif command == 'Stop':
+                                break
+                        else:
+                            logging.error('command=%s could not be identified' % cmd)
+                    elif self.status < 0 :
+                        logging.error('header could not be recieved')
+                else:
+                    self.status = -1
+                    raise RuntimeError('undefined state')
             converter.join()
+            scan.join()
+        except Exception as e:
+            logging.error('Exception, terminating')
+            print e.__class__.__name__ + ": " + str(e)
+            
+
         
 
 
@@ -192,7 +220,26 @@ class ch_communicator():
             logging.info('DAQDONE msg sent')
     
 if __name__ == '__main__':
+    
+    usage = "Usage: %prog dispatcher_addr converter_addr configuration.yaml"
+    description = "dispatcher_addr: Remote address of the sender (default: 127.0.0.1). converter_addr: local address of the SHiP data converter (default: tcp://127.0.0.1:5678). configuration: absolute path of pyBAR configuration.yaml"
+    parser = OptionParser(usage, description=description)
+    options, args = parser.parse_args()
+    if len(args) == 1 and not args[0].find('configuration')==-1 :
+        dispatcher_addr = '127.0.0.1'
+        converter_addr = 'tcp://127.0.0.1:5678'
+        configuration = args
+    elif len(args) == 3:
+        dispatcher_addr = args[0]
+        conveter_addr = args[1]
+        configuration = args[2]
+        
+    else:
+        print len(args)
+        parser.error("incorrect number of arguments")
+    
     rec = run_control(dispatcher_addr='127.0.0.1',converter_addr = 'tcp://127.0.0.1:5678', configuration='/home/niko/git/pyBAR/pybar/configuration.yaml')
+    rec.run()
 #     rec = threading.Thread(name = 'reciever', target = run_control('127.0.0.1', '/home/niko/git/pyBAR/pybar/configuration.yaml'))
 #     rec.start()
     
