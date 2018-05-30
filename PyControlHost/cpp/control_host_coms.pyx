@@ -17,6 +17,7 @@ cdef extern from "getdata.c":
     int wait_head(char *tag, int *size)
     int get_string(char *buf, int lim)
     int my_id(const char *id)
+    int send_me_always()
     
 cdef int buf(cnp.ndarray a):
     return 6
@@ -56,5 +57,8 @@ def rec_data(buf, lim): # makes memcpy to buf of size lim
 def send_fullstring(const char *tag, const char *string):
     return put_fullstring(<const char *>tag, <const char *>string)
    
+def accept_at_all_times():
+    return send_me_always()   
+
 def say_hello_to(name):
     print("Hello %s!" % name)

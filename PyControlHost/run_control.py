@@ -96,9 +96,9 @@ class run_control():
         self.ch_com.init_link(socket_addr, subscriber=None)
         if self.ch_com.status >= 0:
             self.ch_com.subscribe(DetName)
+            self.ch_com.send_me_always()
         else:
             logging.error('Could not subscribe with name=%s , no link to host %s' % (DetName, socket_addr))
-        # TODO: implement ControlHost's send_me_always. Allows dispatcher to send commands at all times.
     
     
     def run(self):
@@ -226,6 +226,12 @@ class ch_communicator():
         elif self.status < 0:
             logging.error('Could not subscribe to host')
         
+    def send_me_always(self):
+        self.status = ch.accept_at_all_times()
+        if self.status >= 0:
+            logging.info('Send me always activated')
+        if self.status < 0:
+            logging.error('Send me always subscription was declined')
     
     def get_cmd(self):
         self.status , cmd = ch.rec_cmd()
