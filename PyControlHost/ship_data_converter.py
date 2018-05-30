@@ -81,7 +81,6 @@ def build_header(n_hits, partitionID, cycleID, trigger_timestamp, bcids=15, flag
         flags (2 byte) = empty for now
 
     """
-    
     data_header = (n_hits*4+16)<<112 ^ partitionID<<96 ^ cycleID<<64 ^ trigger_timestamp<<32 ^ bcids<<16 ^ flag # may not work as expected: getsizeof(2**128) = 44 byte
 #     data_header = [(n_hits*4+16)<<48 ^ partitionID<<32 ^ cycleID , trigger_timestamp<<32 ^ bcids<<16 ^ flag] # two 64bit int may be better than one 128 bit int
 #         self.data_header = bitarray()
@@ -169,7 +168,7 @@ class DataConverter(Thread):
         self.socket_pull = self.context.socket(zmq.SUB)  # subscriber
         self.socket_pull.setsockopt(zmq.SUBSCRIBE, '')  # do not filter any data
         self.socket_pull.connect(self.socket_addr)
-        logging.info('data converter connected to %s' % socket_addr)
+        logging.info('DataConverter connected to %s' % socket_addr)
 
 
     def reset(self,msg=None):
@@ -231,7 +230,7 @@ class DataConverter(Thread):
                         
     def stop(self):
         self._stop_readout.set()
-        logging.info('stopping converter')
+        logging.info('Stopping converter')
 
 
 if __name__ == '__main__':
