@@ -94,12 +94,15 @@ class run_control():
     def connect_CH(self,socket_addr,DetName):
         ''' connect to dispatcher, DetName needed for identification. only needed at initial connection'''
         self.ch_com.init_link(socket_addr, subscriber=None)
-        if self.ch_com.status >= 0:
+        if self.ch_com.status < 0:
+            logging.error('Could not connect to host %s' % socket_addr)
+        elif self.ch_com.status >= 0 :
             self.ch_com.subscribe(DetName)
+        if self.ch_com.status < 0:
+            logging.error('Could not subscribe with name=%s to host %s' % (DetName, socket_addr))
+        elif self.ch_com.status >= 0 :
             self.ch_com.send_me_always()
-        else:
-            logging.error('Could not subscribe with name=%s , no link to host %s' % (DetName, socket_addr))
-    
+        
     
     def run(self):
         ''' 
@@ -115,7 +118,7 @@ class run_control():
 
         try:
             converter = ship_data_converter.DataConverter(self.converter_socket_addr)
-            converter.setName('DataConverter')
+            converter.Name = 'DataConverter'
             converter.Daemon = True
             runmngr = RunManager(self.pybar_conf)
             runmngr.Daemon = True
@@ -145,7 +148,7 @@ class run_control():
                                 header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=self.cycle_ID(), trigger_timestamp=0xFF005C01, bcids=0, flag=0)
                                 self.ch_com.send_data(np.ascontiguousarray(header))
                                 #start pybar trigger scan
-                                joinmngr = runmngr.run_run(ExtTriggerScanSHiP, run_conf={'scan_timeout': 86400}, use_thread=True) # TODO: how to get run number to pyBAR ?
+                                joinmngr = runmngr.run_run(ExtTriggerScanSHiP, run_conf={'scan_timeout': 86400, 'ship_run_number': run_number}, use_thread=True) # TODO: how to get run number to pyBAR ?
                                 joinmngr(timeout = 0.01)
                                 self.ch_com.send_done('SoR',self.partitionID, self.status ) 
                             elif command == 'EoR': # stop existing pyBAR ExtTriggerScanShiP
@@ -167,7 +170,7 @@ class run_control():
                                 if len(cmd) > 1:
                                     cycleID = int(cmd[1])
                                 else:
-                                    cycleID = self.cycle_ID()
+                                    cycleID = 0 #self.cycle_ID()
                                 logging.info('Recieved SoS header, cycleID = %s' % cycleID)
         #                         if central_cycleID != self.cycle_ID():
                                 header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=cycleID, trigger_timestamp=0xFF005C03, bcids=0, flag=0)
