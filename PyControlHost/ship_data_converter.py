@@ -133,7 +133,7 @@ def decode_second_dataword(dataword):
             
 class DataConverter(multiprocessing.Process):
 
-    def __init__(self, socket_addr):
+    def __init__(self, socket_addr, partitionID):
         multiprocessing.Process.__init__(self)
         self.connect(socket_addr)
         self.n_readout = 0
@@ -144,7 +144,8 @@ class DataConverter(multiprocessing.Process):
         self.kill_received = False
         self.ch = ch_communicator()
         self.total_events = 0
-        
+        self.cycle_ID = 0
+        self.partitionID = partitionID
         
 
     def cycle_ID(self):
@@ -174,13 +175,16 @@ class DataConverter(multiprocessing.Process):
         logging.info('DataConverter connected to %s' % socket_addr)
 
 
-    def reset(self,msg=None):
+    def reset(self,cycleID=0, msg=None):
         if msg:
             logging.info(msg)
         with self.reset_lock:
-            self.interpreter.reset()
+            for interpreter in self.interpreters:
+                interpreter.reset()
+#             self.interpreter.reset()
             self.n_readout = 0
             self.total_events = 0
+            self.cycle_ID = cycleID
 
 
     def analyze_raw_data(self, raw_data, module):
@@ -202,6 +206,7 @@ class DataConverter(multiprocessing.Process):
 #     @profile
     def run(self):
         logging.info('DataConverter running and accepting RAWDATA')
+        logging.info('cycleID = %s' % self.cycleID)
         while (not self._stop_readout.wait(0.01)):  # use wait(), do not block here
             with self.reset_lock:
                 try:
@@ -235,7 +240,7 @@ class DataConverter(multiprocessing.Process):
                         for event_table in np.array_split(hits, event_indices)[1:]: # split hit array by events. 1st list entry is empty
                             self.ch_hit_data = process_data_numba(event_table, moduleID=2) # TODO: get moduleID from datastream
                             self.data_header = [build_header( # each event needs a frame header
-                                n_hits=len(self.ch_hit_data)/2, partitionID=3, cycleID=123456789, trigger_timestamp=54447)] #TODO: get trigger_timestamp and cycleID.
+                                n_hits=len(self.ch_hit_data)/2, partitionID=self.partitionID, cycleID=self.cycleID, trigger_timestamp=54447)] #TODO: get trigger_timestamp.
                             self.ch.send_data(np.ascontiguousarray(self.data_header + self.ch_hit_data)) 
                         self.total_events += event_indices.shape[0]
 #                         logging.info('total events %s' % self.total_events)
