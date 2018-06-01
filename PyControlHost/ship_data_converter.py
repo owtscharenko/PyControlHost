@@ -135,9 +135,10 @@ class DataConverter(multiprocessing.Process):
 
     def __init__(self, socket_addr, partitionID):
         multiprocessing.Process.__init__(self)
-        self.connect(socket_addr)
+#         self.connect(socket_addr)
         self.n_readout = 0
         self.n_modules = 8
+        self.socket_addr = socket_addr
         self._stop_readout = multiprocessing.Event()  # exit signal
         self.setup_raw_data_analysis()
         self.reset_lock = multiprocessing.Lock()  # exit signal
@@ -172,7 +173,7 @@ class DataConverter(multiprocessing.Process):
         self.socket_pull = self.context.socket(zmq.SUB)  # subscriber
         self.socket_pull.setsockopt(zmq.SUBSCRIBE, '')  # do not filter any data
         self.socket_pull.connect(self.socket_addr)
-        logging.info('DataConverter connected to %s' % socket_addr)
+        logging.info('DataConverter connected to %s' % self.socket_addr)
 
 
     def reset(self,cycleID=0, msg=None):
@@ -184,7 +185,9 @@ class DataConverter(multiprocessing.Process):
 #             self.interpreter.reset()
             self.n_readout = 0
             self.total_events = 0
+            logging.info('last cycleID=%s'% self.cycle_ID)
             self.cycle_ID = cycleID
+            self._stop_readout.clear()
 
 
     def analyze_raw_data(self, raw_data, module):
@@ -205,12 +208,19 @@ class DataConverter(multiprocessing.Process):
 
 #     @profile
     def run(self):
-        logging.info('DataConverter running and accepting RAWDATA')
-        logging.info('cycleID = %s' % self.cycleID)
-        while (not self._stop_readout.wait(0.01)):  # use wait(), do not block here
+        ''' necessary to instantiate zmq.Context() in run method. Otherwise run has no acces to it.'''
+        self.context = zmq.Context()
+        self.socket_pull = self.context.socket(zmq.SUB)  # subscriber
+        self.socket_pull.setsockopt(zmq.SUBSCRIBE, '')  # do not filter any data
+        self.socket_pull.connect(self.socket_addr)
+        logging.info('DataConverter connected to %s' % self.socket_addr)
+        logging.info('cycleID = %s' % self.cycle_ID)
+        
+        while not self._stop_readout.wait(0.01):  # use wait(), do not block here
+            logging.info('DataConverter running and accepting RAWDATA')s
             with self.reset_lock:
                 try:
-                    meta_data = self.socket_pull.recv_json(flags=zmq.NOBLOCK)
+                    meta_data = self.socket_pull.recv_json(flags=zmq.NOBLOCK) # 
                 except zmq.Again:
                     pass
                 else:
