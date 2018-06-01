@@ -117,7 +117,7 @@ class run_control():
 #             signal.signal(signal.SIGTERM, signal_handler)
 
         try:
-            converter = ship_data_converter.DataConverter(self.converter_socket_addr)
+            converter = ship_data_converter.DataConverter(self.converter_socket_addr, self.partitionID)
             converter.Name = 'DataConverter'
             converter.Daemon = True
             runmngr = RunManager(self.pybar_conf)
@@ -143,6 +143,7 @@ class run_control():
                                     run_number = cmd[1]
                                 else:
                                     run_number = None
+                                converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
                                 converter.start()
                                 #send special SoR header
                                 header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=self.cycle_ID(), trigger_timestamp=0xFF005C01, bcids=0, flag=0)
