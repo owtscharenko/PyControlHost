@@ -5,7 +5,8 @@ import signal
 import logging
 import datetime
 import threading
-from threading import Event, Lock, current_thread, Thread
+import multiprocessing
+from multiprocessing import Event
 from optparse import OptionParser
 from inspect import getmembers, isclass, getargspec
 
@@ -118,10 +119,10 @@ class run_control():
 
         try:
             converter = ship_data_converter.DataConverter(self.converter_socket_addr, self.partitionID)
-            converter.Name = 'DataConverter'
-            converter.Daemon = True
+            converter.name = 'DataConverter'
+            converter.daemon = True
             runmngr = RunManager(self.pybar_conf)
-            runmngr.Daemon = True
+            runmngr.daemon = True
             while True:
                 if self.status >=0 and self.ch_com.status >=0 :
                     self.status = ch.get_head_wait('DAQCMD', self.ch_com.cmdsize)
@@ -144,7 +145,8 @@ class run_control():
                                 else:
                                     run_number = None
                                 converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
-                                converter.start()
+                                if not converter.is_alive():
+                                    converter.start()
                                 #send special SoR header
                                 header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=self.cycle_ID(), trigger_timestamp=0xFF005C01, bcids=0, flag=0)
                                 self.ch_com.send_data(np.ascontiguousarray(header))
@@ -158,8 +160,8 @@ class run_control():
                                     runmngr.current_run.stop(msg='ExtTriggerScanSHiP') # TODO: check how to properly stop pyBAR RunManager
                                 else:
                                     logging.error('Recieved EoR command, but no ExtTriggerScanSHiP running')
-                                if converter.isAlive():
-                                    converter.reset(msg='resetting DataConverter') # reset interpreter and event counter
+                                if converter.is_alive():
+                                    converter.reset(cycleID = self.cycle_ID(), msg='EoR command, resetting DataConverter') # reset interpreter and event counter
                                     logging.info('DataConverter has been reset')
                                 else:
                                     logging.error('Recieved EoR command to reset converter, but no converter running')
@@ -302,7 +304,6 @@ if __name__ == '__main__':
         partitionID = args[3]
         
     else:
-        print len(args)
         parser.error("incorrect number of arguments")
     
     rec = run_control(dispatcher_addr,
