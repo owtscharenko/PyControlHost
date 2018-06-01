@@ -1,12 +1,10 @@
-from threading import Event, Lock
 from optparse import OptionParser
 import zmq
 import numpy as np
 import datetime
 from numba import njit
 import cProfile
-import threading
-from threading import Thread
+import multiprocessing
 import logging
 
 from build_binrep import hit_to_binary
@@ -133,18 +131,20 @@ def decode_second_dataword(dataword):
     return tot, moduleID, flag, rel_BCID
 
             
-class DataConverter(Thread):
+class DataConverter(multiprocessing.Process):
 
     def __init__(self, socket_addr):
-        Thread.__init__(self)
+        multiprocessing.Process.__init__(self)
         self.connect(socket_addr)
         self.n_readout = 0
-        self._stop_readout = Event()
+        self.n_modules = 8
+        self._stop_readout = multiprocessing.Event()  # exit signal
         self.setup_raw_data_analysis()
-        self.reset_lock = Lock()
+        self.reset_lock = multiprocessing.Lock()  # exit signal
         self.kill_received = False
         self.ch = ch_communicator()
         self.total_events = 0
+        
         
 
     def cycle_ID(self):
@@ -154,12 +154,15 @@ class DataConverter(Thread):
 
 
     def setup_raw_data_analysis(self):
-        self.interpreter = PyDataInterpreter()
-        self.interpreter.create_empty_event_hits(True)
-        self.interpreter.set_trigger_data_format(1)
-        self.interpreter.align_at_trigger(True)
-        self.interpreter.set_warning_output(False)
-        self.interpreter.set_FEI4B(True)
+        self.interpreters = []
+        for _ in range(self.n_modules):
+            interpreter = PyDataInterpreter()
+            interpreter.create_empty_event_hits(True)
+            interpreter.set_trigger_data_format(1)
+            interpreter.align_at_trigger(True)
+            interpreter.set_warning_output(False)
+            interpreter.set_FEI4B(True)
+            self.interpreters.append(interpreter)
 
 
     def connect(self, socket_addr):
@@ -180,8 +183,8 @@ class DataConverter(Thread):
             self.total_events = 0
 
 
-    def analyze_raw_data(self, raw_data):
-        return self.interpreter.interpret_raw_data(raw_data)
+    def analyze_raw_data(self, raw_data, module):
+        return self.interpreters[module].interpret_raw_data(raw_data)
 
 
     def build_event_frame(self, data_header, hit_data):
@@ -217,15 +220,24 @@ class DataConverter(Thread):
                         shape = meta_data.pop('shape')
                         data_array = np.frombuffer(buf, dtype=dtype).reshape(shape)
 #                         pr.enable()
-                        self.analyze_raw_data(data_array)
-                        hits = self.interpreter.get_hits()
-                        _, n_events = np.unique(hits['event_number'], return_index = True) # count number of events in array
-                        for event_table in np.array_split(hits, n_events)[1:]: # split hit array by events. 1st list entry is empty
-                            self.ch_hit_data = process_data_numba(event_table, moduleID=2)
+                        #sort hits by frontend
+                        for module in range(8):
+                            selection_frontend = np.bitwise_and(data_array, 0x0F000000) == np.left_shift(module + 1, 24)
+                            selection_trigger = np.bitwise_and(data_array, 0x80000000) == np.left_shift(1, 31)
+                            selection = np.logical_or(selection_frontend, selection_trigger)
+
+                            self.analyze_raw_data(raw_data=np.ascontiguousarray(data_array[selection]), module=module)
+                            hits = self.interpreters[module].get_hits()
+                            #TODO: build one event from all modules
+                            _, event_indices = np.unique(hits['event_number'], return_index = True) # count number of events in array
+                        
+                        
+                        for event_table in np.array_split(hits, event_indices)[1:]: # split hit array by events. 1st list entry is empty
+                            self.ch_hit_data = process_data_numba(event_table, moduleID=2) # TODO: get moduleID from datastream
                             self.data_header = [build_header( # each event needs a frame header
                                 n_hits=len(self.ch_hit_data)/2, partitionID=3, cycleID=123456789, trigger_timestamp=54447)] #TODO: get trigger_timestamp and cycleID.
                             self.ch.send_data(np.ascontiguousarray(self.data_header + self.ch_hit_data)) 
-                        self.total_events += n_events.shape[0]
+                        self.total_events += event_indices.shape[0]
 #                         logging.info('total events %s' % self.total_events)
                         
     def stop(self):
