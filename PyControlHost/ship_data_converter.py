@@ -12,9 +12,11 @@ from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
 from pybar_fei4_interpreter.data_histograming import PyDataHistograming
 from run_control import run_control, ch_communicator
 
-        
+
+
+
 @njit             
-def process_data_numba(data_array, moduleID, flag=0):
+def process_data_numba(data_array, flag=0):
     '''
     each hit is converted to two 16bit datawords, 1st word is pixel of
     FE, second word is relBCID + number of FE + tot
@@ -50,7 +52,7 @@ def process_data_numba(data_array, moduleID, flag=0):
     for i in range(data_array.shape[0]):
         row = data_array['row'][i]
         column = data_array['column'][i]
-            
+        moduleID = data_array['moduleID'][i]
         channelID = np.uint16(column<<9 ^ row)
 
         ch_2nd_dataword = np.uint16(data_array['tot'][i]<<12 ^ moduleID<<8 ^ flag<<4 ^ np.uint8(data_array['relative_BCID'][i]))  
@@ -147,6 +149,22 @@ class DataConverter(multiprocessing.Process):
         self.total_events = 0
         self.cycle_ID = 0
         self.partitionID = partitionID
+        self.multi_chip_event_dtype =[('event_number', '<i8'),
+                                        ('trigger_number', '<u4'),
+                                        ('trigger_time_stamp', '<u4'), 
+                                        ('relative_BCID', 'u1'),
+                                        ('LVL1ID', '<u2'),
+                                        ('moduleID','<u1')
+                                        ('column', 'u1'),
+                                        ('row', '<u2'), 
+                                        ('tot', 'u1'),
+                                        ('BCID', '<u2'),
+                                        ('TDC', '<u2'), 
+                                        ('TDC_time_stamp', 'u1'), 
+                                        ('trigger_status', 'u1'),
+                                        ('service_record', '<u4'),
+                                        ('event_status', '<u2')
+                                    ]
         
 
     def cycle_ID(self):
@@ -208,7 +226,7 @@ class DataConverter(multiprocessing.Process):
 
 #     @profile
     def run(self):
-        ''' necessary to instantiate zmq.Context() in run method. Otherwise run has no acces to it.'''
+        ''' necessary to instantiate zmq.Context() in run method. Otherwise run has no acces to it when called as multiprocessing.process.'''
         self.context = zmq.Context()
         self.socket_pull = self.context.socket(zmq.SUB)  # subscriber
         self.socket_pull.setsockopt(zmq.SUBSCRIBE, '')  # do not filter any data
@@ -217,17 +235,17 @@ class DataConverter(multiprocessing.Process):
         logging.info('cycleID = %s' % self.cycle_ID)
         
         while not self._stop_readout.wait(0.01):  # use wait(), do not block here
-            logging.info('DataConverter running and accepting RAWDATA')s
+            logging.info('DataConverter running and accepting RAWDATA')
             with self.reset_lock:
                 try:
-                    meta_data = self.socket_pull.recv_json(flags=zmq.NOBLOCK) # 
+                    meta_data = self.socket_pull.recv_json(flags=zmq.NOBLOCK)
                 except zmq.Again:
                     pass
                 else:
                     name = meta_data.pop('name')
-                    if name =='Filename':
-                        print meta_data.pop('conf')
-                    elif name == 'ReadoutData':
+#                     if name =='Filename':
+#                         print meta_data.pop('conf')
+                    if name == 'ReadoutData':
                         data = self.socket_pull.recv()
                         # reconstruct numpy array
                         buf = buffer(data)
@@ -236,24 +254,33 @@ class DataConverter(multiprocessing.Process):
                         data_array = np.frombuffer(buf, dtype=dtype).reshape(shape)
 #                         pr.enable()
                         #sort hits by frontend
-                        for module in range(8):
+                        multimodule_hits = []
+                        for module in range(8): # TODO: fast enough? only possible to check with 8 modules
                             selection_frontend = np.bitwise_and(data_array, 0x0F000000) == np.left_shift(module + 1, 24)
                             selection_trigger = np.bitwise_and(data_array, 0x80000000) == np.left_shift(1, 31)
                             selection = np.logical_or(selection_frontend, selection_trigger)
-
+    
                             self.analyze_raw_data(raw_data=np.ascontiguousarray(data_array[selection]), module=module)
                             hits = self.interpreters[module].get_hits()
-                            #TODO: build one event from all modules
-                            _, event_indices = np.unique(hits['event_number'], return_index = True) # count number of events in array
+                            hits = np.append(hits, np.full(shape = (hits.shape[0],1),fill_value = module, dtype = ('moduleID',np.uint8)), axis=1)
+                            multimodule_hits.append(hits)
+                        #check building of common event from all modules
+                        multimodule_hits = np.vstack(multimodule_hits)
+                        _, event_indices = np.unique(multimodule_hits['event_number'], return_index = True) # count number of events in array
                         
                         
-                        for event_table in np.array_split(hits, event_indices)[1:]: # split hit array by events. 1st list entry is empty
-                            self.ch_hit_data = process_data_numba(event_table, moduleID=2) # TODO: get moduleID from datastream
-                            self.data_header = [build_header( # each event needs a frame header
-                                n_hits=len(self.ch_hit_data)/2, partitionID=self.partitionID, cycleID=self.cycleID, trigger_timestamp=54447)] #TODO: get trigger_timestamp.
+                        for event_table in np.array_split(multimodule_hits, event_indices)[1:]: # split hit array by events. 1st list entry is empty
+                            self.ch_hit_data = process_data_numba(event_table) # TODO: check moduleID from datastream
+                            # each event needs a frame header
+                            self.data_header = [build_header( 
+                                                            n_hits=len(self.ch_hit_data)/2, partitionID=self.partitionID, cycleID=self.cycleID,
+                                                            trigger_timestamp=event_table['trigger_timestamp'][0]
+                                                            )
+                                                ] #TODO: check trigger_timestamp.
                             self.ch.send_data(np.ascontiguousarray(self.data_header + self.ch_hit_data)) 
                         self.total_events += event_indices.shape[0]
 #                         logging.info('total events %s' % self.total_events)
+                        
                         
     def stop(self):
         self._stop_readout.set()
