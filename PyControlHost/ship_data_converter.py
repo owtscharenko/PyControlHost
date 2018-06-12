@@ -10,7 +10,8 @@ import logging
 from build_binrep import hit_to_binary
 from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
 from pybar_fei4_interpreter.data_histograming import PyDataHistograming
-from run_control import run_control, ch_communicator
+# import run_control.run_control as run_control
+from run_control import ch_communicator
 
 
 
@@ -153,17 +154,17 @@ class DataConverter(multiprocessing.Process):
                                         ('trigger_number', '<u4'),
                                         ('trigger_time_stamp', '<u4'), 
                                         ('relative_BCID', 'u1'),
-                                        ('LVL1ID', '<u2'),
-                                        ('moduleID','<u1')
+#                                         ('LVL1ID', '<u2'),
+                                        ('moduleID','u1'),
                                         ('column', 'u1'),
                                         ('row', '<u2'), 
                                         ('tot', 'u1'),
-                                        ('BCID', '<u2'),
-                                        ('TDC', '<u2'), 
-                                        ('TDC_time_stamp', 'u1'), 
-                                        ('trigger_status', 'u1'),
-                                        ('service_record', '<u4'),
-                                        ('event_status', '<u2')
+#                                         ('BCID', '<u2'),
+#                                         ('TDC', '<u2'), 
+#                                         ('TDC_time_stamp', 'u1'), 
+#                                         ('trigger_status', 'u1'),
+#                                         ('service_record', '<u4'),
+#                                         ('event_status', '<u2')
                                     ]
         
 
@@ -235,7 +236,7 @@ class DataConverter(multiprocessing.Process):
         logging.info('cycleID = %s' % self.cycle_ID)
         
         while not self._stop_readout.wait(0.01):  # use wait(), do not block here
-            logging.info('DataConverter running and accepting RAWDATA')
+#             logging.info('DataConverter running and accepting RAWDATA')
             with self.reset_lock:
                 try:
                     meta_data = self.socket_pull.recv_json(flags=zmq.NOBLOCK)
@@ -254,32 +255,56 @@ class DataConverter(multiprocessing.Process):
                         data_array = np.frombuffer(buf, dtype=dtype).reshape(shape)
 #                         pr.enable()
                         #sort hits by frontend
-                        multimodule_hits = []
-                        for module in range(8): # TODO: fast enough? only possible to check with 8 modules
+                        multimodule_hits = np.empty(shape=(0,),dtype = self.multi_chip_event_dtype)
+                        for module in range(8): # TODO: fast enough? only possible to check with 8 FEs
                             selection_frontend = np.bitwise_and(data_array, 0x0F000000) == np.left_shift(module + 1, 24)
                             selection_trigger = np.bitwise_and(data_array, 0x80000000) == np.left_shift(1, 31)
                             selection = np.logical_or(selection_frontend, selection_trigger)
     
                             self.analyze_raw_data(raw_data=np.ascontiguousarray(data_array[selection]), module=module)
                             hits = self.interpreters[module].get_hits()
-                            hits = np.append(hits, np.full(shape = (hits.shape[0],1),fill_value = module, dtype = ('moduleID',np.uint8)), axis=1)
-                            multimodule_hits.append(hits)
+                            module_hits = np.empty(shape=(hits.shape[0],),dtype = self.multi_chip_event_dtype)
+#                             hits = np.append(hits, np.full(shape = (hits.shape[0],1),fill_value = module, dtype = [('moduleID',np.uint8)]))
+                            module_hits['event_number'] = hits['event_number']
+                            module_hits['trigger_number'] = hits['trigger_number']
+                            module_hits['trigger_time_stamp'] = hits['trigger_time_stamp']
+                            module_hits['relative_BCID'] = hits['relative_BCID']
+                            module_hits['column'] = hits['column']
+                            module_hits['row'] = hits['row']
+                            module_hits['tot'] = hits['tot']
+                            module_hits['moduleID'] = module
+#                             if module == 0:
+#                                 pass
+#                             else:
+                            multimodule_hits = np.concatenate((multimodule_hits,module_hits))
+#                             multimodule_hits.append(module_hits)
                         #check building of common event from all modules
-                        multimodule_hits = np.vstack(multimodule_hits)
+#                         multimodule_hits = module_hits # np.vstack(np.asarray(multimodule_hits))
+#                         multimodule_hits = np.asarray([multimodule_hits[0],multimodule_hits[1],multimodule_hits[2],multimodule_hits[3],
+#                                                        multimodule_hits[4],multimodule_hits[5],multimodule_hits[6],multimodule_hits[7]])
+#                         print multimodule_hits.shape
                         _, event_indices = np.unique(multimodule_hits['event_number'], return_index = True) # count number of events in array
                         
-                        
                         for event_table in np.array_split(multimodule_hits, event_indices)[1:]: # split hit array by events. 1st list entry is empty
-                            self.ch_hit_data = process_data_numba(event_table) # TODO: check moduleID from datastream
+                            channelID = np.bitwise_or(event_table['row']<<7,event_table['column'],order='C',dtype='<u2')
+                            ch_2nd_dataword = np.bitwise_or(np.bitwise_or(event_table['tot']<<4,event_table['moduleID'])<<8,
+                                                                      np.bitwise_or(0<<4,event_table['relative_BCID']),order='C',dtype='<u2')
+#                             self.ch_hit_data = process_data_numba(event_table) # TODO: check moduleID from datastream
+                            self.ch_hit_data = np.vstack((channelID,ch_2nd_dataword)).T
                             # each event needs a frame header
-                            self.data_header = [build_header( 
-                                                            n_hits=len(self.ch_hit_data)/2, partitionID=self.partitionID, cycleID=self.cycleID,
-                                                            trigger_timestamp=event_table['trigger_timestamp'][0]
+                            self.data_header = build_header( 
+                                                            n_hits=channelID.shape[0], partitionID=self.partitionID, cycleID=self.cycle_ID,
+                                                            trigger_timestamp=event_table['trigger_time_stamp'][0]
                                                             )
-                                                ] #TODO: check trigger_timestamp.
-                            self.ch.send_data(np.ascontiguousarray(self.data_header + self.ch_hit_data)) 
+#                             self.data_header = [build_header( 
+#                                                             n_hits=len(self.ch_hit_data)/2, partitionID=self.partitionID, cycleID=self.cycleID,
+#                                                             trigger_timestamp=event_table['trigger_timestamp'][0]
+#                                                             )
+#                                                 ] #TODO: check trigger_timestamp.
+#                             self.ch.send_data(np.ascontiguousarray(self.data_header + self.ch_hit_data)) 
+                            self.ch.send_data(np.ascontiguousarray((self.data_header,self.ch_hit_data)))
                         self.total_events += event_indices.shape[0]
-#                         logging.info('total events %s' % self.total_events)
+                        logging.info('total events %s' % self.total_events)
                         
                         
     def stop(self):

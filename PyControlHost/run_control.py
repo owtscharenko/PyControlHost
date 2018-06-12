@@ -116,7 +116,6 @@ class run_control():
 #             signal_handler = self._signal_handler
 #             signal.signal(signal.SIGINT, signal_handler)
 #             signal.signal(signal.SIGTERM, signal_handler)
-
         try:
             converter = ship_data_converter.DataConverter(self.converter_socket_addr, self.partitionID)
             converter.name = 'DataConverter'
@@ -151,7 +150,7 @@ class run_control():
                                 header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=self.cycle_ID(), trigger_timestamp=0xFF005C01, bcids=0, flag=0)
                                 self.ch_com.send_data(np.ascontiguousarray(header))
                                 #start pybar trigger scan
-                                joinmngr = runmngr.run_run(ExtTriggerScanSHiP, run_conf={'scan_timeout': 86400, 'ship_run_number': run_number}, use_thread=True) # TODO: how to get run number to pyBAR ?
+                                joinmngr = runmngr.run_run(ExtTriggerScanSHiP, run_conf={'scan_timeout': 86400, 'max_triggers':0, 'ship_run_number': run_number}, use_thread=False) # TODO: how to get run number to pyBAR ?
                                 joinmngr(timeout = 0.01)
                                 self.ch_com.send_done('SoR',self.partitionID, self.status ) 
                             elif command == 'EoR': # stop existing pyBAR ExtTriggerScanShiP
@@ -299,7 +298,7 @@ if __name__ == '__main__':
         partitionID = '0X0802'
     elif len(args) == 4:
         dispatcher_addr = args[0]
-        conveter_addr = args[1]
+        converter_addr = args[1]
         configuration = args[2]
         partitionID = args[3]
         
