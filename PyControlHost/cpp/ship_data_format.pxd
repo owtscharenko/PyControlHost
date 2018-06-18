@@ -26,15 +26,15 @@ cdef packed struct np_Hit:
     uint16_t hit_Data
     
 ctypedef struct DataFrameHeader:
-    uint16_t size
-    uint16_t partitionID
-    uint32_t cycleID
-    uint32_t frameTime
-    uint16_t timeExtent
-    uint16_t flags
+    unsigned short size
+    unsigned short partitionID
+    unsigned int cycleID
+    unsigned int frameTime
+    unsigned short timeExtent
+    unsigned short flags
 
 ctypedef struct Hit:
-    uint16_t channelId
-    uint16_t hit_Data
+    unsigned short channelId
+    unsigned short hit_Data
     
     
