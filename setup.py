@@ -9,9 +9,9 @@ version = '0.1.0'
 
 extensions = [
     Extension("PyControlHost.control_host_coms", ["PyControlHost/cpp/control_host_coms.pyx"],
-        include_dirs = ['../ControlHost/include', '../ControlHost/src'],
+        include_dirs = ['../ControlHost/include', '../ControlHost/src', 'PyControlHost/cpp'],
         libraries = ['conthost_shared']), # library libconthost_shared.so must be in /usr/lib and accessible for user (chmod 0755)
-    Extension("PyControlHost.build_binrep", ["PyControlHost/cpp/build_binrep.pyx"],)
+#     Extension("PyControlHost.build_binrep", ["PyControlHost/cpp/build_binrep.pyx"],)
 #         library_dirs = ['/home/niko/git/ControlHost/bin'])
     ]
 

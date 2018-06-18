@@ -9,6 +9,7 @@ from multiprocessing import Event
 from optparse import OptionParser
 from inspect import getmembers, isclass, getargspec
 from timeit import Timer as T
+import random
 
 import zmq
 import numpy as np
@@ -31,7 +32,7 @@ class ch_communicator():
 #         self.connect(socket_addr,subscriber = 'Pixels') # tags identify the type of information which is transmitted: DAQCMD, DAQACK DAQDONE
         self.cmd = np.char.asarray(['0']*127, order={'C'}) # controlHost commands are written to this variable, size given in c 'chars'
         self.cmdsize = np.ascontiguousarray(np.int8(self.cmd.nbytes)) # maximum size of numpy array in bytes. Necessary for cmd reception, ControlHost needs to know the max. cmd size.
-        self.ch = CDLL('/home/niko/git/ControlHost1-1/shared/libconthost_shared.so')
+        self.ch = CDLL('/home/niko/git/ControlHost/shared/libconthost_shared.so')
         
     def cycle_ID(self):
         ''' counts in 0.2s steps from 08. April 2015 '''
@@ -95,6 +96,9 @@ class ch_communicator():
         self.status = self.ch.put_fulldata('RAW_0802', pointer(data), c_int(length))
         if self.status < 0:
             logging.error('Sending package failed')
+            
+    def send_data_conc(self,header,hits):
+        self.ch.send_fulldata_conc(header,hits)
         
         
     def send_ack(self,tag,msg):
@@ -156,28 +160,47 @@ def fill_frame(evt, channelID, add_dataword):
 
 if __name__ == '__main__':
     
+    
+    start = time.time()
+    
     ch_com = ch_communicator()
     ch_com.init_link('127.0.0.1', subscriber=None)
     ch_com.subscribe('Pixels2_LocDaq_0802')
     ch_com.send_me_always()
-    cycle = ch_com.cycle_ID()
-    print "cycleID:" , cycle, hex(cycle)
-    
-    channelID = [41296,41295,41294,0xffff] #80<<9 ^ 336 = 0xa150
-    add_dataword = [49672,49571,49670,0xfffe] # 12<<12 ^ 2<<8 ^ 0<<4 ^ 8 = 0xc208
-#     evt = make_frame(len(channelID))
-#     print T(lambda:make_frame(len(channelID))).timeit(50000)
-    evt = EvtFrame()
-    fill_frame(evt,channelID,add_dataword)
-    evt.head.size= len(channelID)*4+16
-    evt.head.partId = 0x0802
-    evt.head.cycleId = cycle
-    evt.head.frTime = 0xFF005C01
-    evt.head.timeEx = 15
-    evt.head.flags = 0
-    fill_frame(evt,channelID,add_dataword)
-    
-    ch_com.send_data(evt)
-    print "frame size: %s byte" % evt.head.size
+    Nhits_av = 0
+#     evt =EvtFrame()
+
+    for event in range(50000):
+        
+        cycle = ch_com.cycle_ID()
+#         print "cycleID:" , cycle, hex(cycle)
+        
+        Nhits = random.randint(100,300)
+#         logging.info("Nhits = %s" % Nhits)
+#         Nhits_av = Nhits_av + Nhits
+        evt = make_frame(Nhits)
+        evt.size= Nhits*4+16
+        evt.partId = 0x0802
+        evt.cycleId = cycle
+        evt.frTime = 0xFF005C01
+        evt.timeEx = 15
+        evt.flags = 0
+        
+        channelID = 41296 # [41296,41295,41294,0xffff] #80<<9 ^ 336 = 0xa150
+        add_dataword = 49672 # [49672,49571,49670,0xfffe] # 12<<12 ^ 2<<8 ^ 0<<4 ^ 8 = 0xc208
+    #     evt = make_frame(len(channelID))
+    #     print T(lambda:make_frame(len(channelID))).timeit(50000)
+        
+        for hit in range(Nhits):
+            evt.hits[hit].channelID = channelID - hit
+            evt.hits[hit].hit_data = add_dataword - hit
+#             fill_frame(evt,channelID,add_dataword)
+
+#             fill_frame(evt,channelID,add_dataword)
+        
+        ch_com.send_data(evt)
+    print "frame size: %s byte" % evt.size
+    print "total time: " , time.time()-start
+#     print "avg Nhits = %", Nhits_av/50000
 
     
