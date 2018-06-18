@@ -45,6 +45,8 @@ class run_control():
         self.DetName = 'Pixels' + partitionID[5:] + '_LocDaq_' + partitionID[2:]
         self.ch_com = ch_communicator()
         self.connect_CH(self.socket_addr,self.DetName)
+        self.cmd = []
+        self.command = 'none'
 
         
     def _signal_handler(self, signum, frame):
@@ -122,25 +124,26 @@ class run_control():
             converter.daemon = True
             runmngr = RunManager(self.pybar_conf)
             runmngr.daemon = True
+            joinmngr = None
             while True:
                 if self.status >=0 and self.ch_com.status >=0 :
                     self.status = ch.get_head_wait('DAQCMD', self.ch_com.cmdsize)
                     if self.status >=0 and self.ch_com.status >=0 :
                         logging.info('Recieved header')
-                        cmd = self.ch_com.get_cmd() # recieved command contains command word [0] and additional info [1]... different for each case
-                        if len(cmd) > 1:
-                            command = cmd[0]
-                        elif len(cmd)==0 or len(cmd) ==1 :
-                            command = cmd
-                        if command in self.commands and self.ch_com.status >=0:
-                            self.ch_com.send_ack(tag='DAQACK',msg = '%s %04X %s' %(command, self.partitionID, self.socket_addr)) # acknowledge command
-                            if command == 'Enable': # enable detector partition
+                        self.cmd = self.ch_com.get_cmd() # recieved command contains command word [0] and additional info [1]... different for each case
+                        if len(self.cmd) > 1:
+                            self.command = self.cmd[0]
+                        elif len(self.cmd)==0 or len(self.cmd) ==1 :
+                            self.command = self.cmd
+                        if self.command in self.commands and self.ch_com.status >=0:
+                            self.ch_com.send_ack(tag='DAQACK',msg = '%s %04X %s' %(self.command, self.partitionID, self.socket_addr)) # acknowledge command
+                            if self.command == 'Enable': # enable detector partition
                                 self.enabled = True
-                            elif command == 'Disable': #disable detector partition
+                            elif self.command == 'Disable': #disable detector partition
                                 self.enabled = False
-                            elif command == 'SoR': # Start new pyBAR ExtTriggerScanShiP.
-                                if len(cmd) > 1:
-                                    run_number = cmd[1]
+                            elif self.command == 'SoR': # Start new pyBAR ExtTriggerScanShiP.
+                                if len(self.cmd) > 1:
+                                    run_number = self.cmd[1]
                                 else:
                                     run_number = None
                                 converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
@@ -148,15 +151,16 @@ class run_control():
                                     converter.start()
                                 #send special SoR header
                                 header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=self.cycle_ID(), trigger_timestamp=0xFF005C01, bcids=0, flag=0)
-                                self.ch_com.send_data(np.ascontiguousarray(header))
+                                self.ch_com.send_data_numpy(tag = 'RAW_0802', header, hits=0)
                                 #start pybar trigger scan
-                                joinmngr = runmngr.run_run(ExtTriggerScanSHiP, run_conf={'scan_timeout': 86400, 'max_triggers':0, 'ship_run_number': run_number}, use_thread=False) # TODO: how to get run number to pyBAR ?
-                                joinmngr(timeout = 0.01)
+                                joinmngr = runmngr.run_run(ExtTriggerScanSHiP, run_conf={'scan_timeout': 86400, 'max_triggers':0, 'ship_run_number': run_number}, use_thread=True) # TODO: how to get run number to pyBAR ?
+                                
                                 self.ch_com.send_done('SoR',self.partitionID, self.status ) 
-                            elif command == 'EoR': # stop existing pyBAR ExtTriggerScanShiP
+                            elif self.command == 'EoR': # stop existing pyBAR ExtTriggerScanShiP
                                 logging.info('Recieved EoR command')
-                                if runmngr.current_run.__class__.__name__ == 'ExtTriggerScanSHiP':
+                                if runmngr.current_run.__class__.__name__ == 'ExtTriggerScanSHiP' and joinmngr != None:
                                     runmngr.current_run.stop(msg='ExtTriggerScanSHiP') # TODO: check how to properly stop pyBAR RunManager
+                                    joinmngr(timeout = 0.01)
                                 else:
                                     logging.error('Recieved EoR command, but no ExtTriggerScanSHiP running')
                                 if converter.is_alive():
@@ -166,28 +170,28 @@ class run_control():
                                     logging.error('Recieved EoR command to reset converter, but no converter running')
                                 # send special EoR header
                                 header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=self.cycle_ID(), trigger_timestamp=0xFF005C02, bcids=0, flag=0)
-                                self.ch_com.send_data(np.ascontiguousarray(header))
+                                self.ch_com.send_data_numpy(tag = 'RAW_0802', header, hits=0)
                                 self.ch_com.send_done('EoR',self.partitionID, self.status)
-                            elif command == 'SoS': # new spill. trigger counter will be reset by hardware signal. The software command triggers an empty header
-                                if len(cmd) > 1:
-                                    cycleID = int(cmd[1])
+                            elif self.command == 'SoS': # new spill. trigger counter will be reset by hardware signal. The software command triggers an empty header
+                                if len(self.cmd) > 1:
+                                    cycleID = int(self.cmd[1])
                                 else:
                                     cycleID = 0 #self.cycle_ID()
                                 logging.info('Recieved SoS header, cycleID = %s' % cycleID)
         #                         if central_cycleID != self.cycle_ID():
                                 header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=cycleID, trigger_timestamp=0xFF005C03, bcids=0, flag=0)
-                                self.ch_com.send_data(np.ascontiguousarray(header))
+                                self.ch_com.send_data_numpy(tag = 'RAW_0802', header, hits=0)
                                 self.ch_com.send_done('SoS',self.partitionID, converter.total_events) # TODO: make sure send done is called after last event is converted
-                            elif command == 'EoS': # trigger EoS header, sent after last event
+                            elif self.command == 'EoS': # trigger EoS header, sent after last event
                                 logging.info('recieved EoS, local cycleID:%s' % self.cycle_ID())
                                 header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=self.cycleID(), trigger_timestamp=0xFF005C04, bcids=0, flag=0) # TODO: send EoS header after last event from spill
-                                self.ch_com.send_data(np.ascontiguousarray(header))
+                                self.ch_com.send_data_numpy(tag = 'RAW_0802', header, hits=0)
                                 self.ch_com.send_done('EoS', self.partitionID, self.status)
-                            elif command == 'Stop':
+                            elif self.command == 'Stop':
                                 logging.info('Recieved Stop! Leaving loop, aborting all functions')
                                 break
                         else:
-                            logging.error('Command=%s could not be identified' % cmd)
+                            logging.error('Command=%s could not be identified' % self.cmd)
                     elif self.status < 0 :
                         logging.error('Header could not be recieved')
                 else:
@@ -259,10 +263,9 @@ class ch_communicator():
         return data
     
     
-    def send_data(self, data):
-        length = sys.getsizeof(data)
+    def send_data(self, tag, header, hits):
 #         logging.info('sending data package with %s byte' % length)
-        self.status = ch.send_fulldata('DATA', data, length)
+        self.status = ch.send_fulldata_numpy(tag, header, hits) # TODO: case only header, no hits. 
         if self.status < 0:
             logging.error('Sending package failed')
         
