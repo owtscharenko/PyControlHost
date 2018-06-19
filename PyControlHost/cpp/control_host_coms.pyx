@@ -25,6 +25,7 @@ cdef extern from 'utils.h':
     cdef cppclass Hit:
         Hit()
     unsigned short* build_EvtFrame(DataFrameHeader*& header, Hit*& hits, const unsigned int head_length, const unsigned int hits_length)
+    unsigned short* build_special_header(DataFrameHeader*& header, const unsigned int head_length)
     
 cdef int buf(cnp.ndarray a):
     return 6
@@ -72,6 +73,11 @@ def send_fulldata_numpy(const char *tag, ndarray head, ndarray hits):
     cdef unsigned short *frame = build_EvtFrame(<DataFrameHeader*&> head.data, <Hit*&>  hits.data, head_size, hits_size)
 #     print "frame size c : %s Byte" %size
     return put_fulldata(tag, <const void *>frame, size)
+
+def send_header_numpy(const char *tag, ndarray head):
+    cdef int head_size = head.nbytes
+    cdef unsigned short *frame = build_special_header(<DataFrameHeader*&> head.data, head_size)
+    return put_fulldata(tag, <const void *>frame, head_size)
 
 def rec_cmd():
     cdef char cmd_str[200]

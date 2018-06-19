@@ -62,3 +62,15 @@ unsigned short *build_EvtFrame(DataFrameHeader*& header, Hit*& hits, const unsig
 //    printf("memcp size: %i Byte\n",head_length + hits_length);
 	return path;
 	}
+
+unsigned short *build_special_header(DataFrameHeader*& header, const unsigned int& head_length)
+	{
+//  build header for reaction to commands (SoR, EoR, SoS, EoS...)
+//  allocate contiguous part of memory of correct size
+	unsigned short *path;
+	path = (unsigned short *)malloc(head_length);
+	//  now: copy header to beginning of path
+	memcpy(path, header, head_length);
+
+	return path;
+	}
