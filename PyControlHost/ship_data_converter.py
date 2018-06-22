@@ -245,9 +245,7 @@ class DataConverter(threading.Thread):
         self.socket_pull.connect(self.socket_addr)
         logging.info('DataConverter connected to %s' % self.socket_addr)
         logging.info('cycleID = %s' % self.cycle_ID)
-        
         while not self._stop_readout.wait(0.01):  # use wait(), do not block here
-#             logging.info('DataConverter running and accepting RAWDATA')
             with self.reset_lock:
                 try:
                     meta_data = self.socket_pull.recv_json(flags=zmq.NOBLOCK)
@@ -255,8 +253,6 @@ class DataConverter(threading.Thread):
                     pass
                 else:
                     name = meta_data.pop('name')
-#                     if name =='Filename':
-#                         print meta_data.pop('conf')
                     if name == 'ReadoutData':
                         data = self.socket_pull.recv()
                         # reconstruct numpy array
@@ -264,7 +260,6 @@ class DataConverter(threading.Thread):
                         dtype = meta_data.pop('dtype')
                         shape = meta_data.pop('shape')
                         data_array = np.frombuffer(buf, dtype=dtype).reshape(shape)
-#                         pr.enable()
                         #sort hits by frontend
                         multimodule_hits = np.empty(shape=(0,),dtype = self.multi_chip_event_dtype)
                         for module in range(8): # TODO: fast enough? only possible to check with 8 FEs
@@ -293,7 +288,6 @@ class DataConverter(threading.Thread):
 #                         multimodule_hits = module_hits # np.vstack(np.asarray(multimodule_hits))
 #                         multimodule_hits = np.asarray([multimodule_hits[0],multimodule_hits[1],multimodule_hits[2],multimodule_hits[3],
 #                                                        multimodule_hits[4],multimodule_hits[5],multimodule_hits[6],multimodule_hits[7]])
-#                         print multimodule_hits.shape
                         _, event_indices = np.unique(multimodule_hits['event_number'], return_index = True) # count number of events in array
                         
                         for event_table in np.array_split(multimodule_hits, event_indices)[1:]: # split hit array by events. 1st list entry is empty

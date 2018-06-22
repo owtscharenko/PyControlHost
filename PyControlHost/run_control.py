@@ -17,22 +17,24 @@ import control_host_coms as ch
 from pybar import *
 import ship_data_converter
 from  ControlHost import ch_communicator, FrHeader
+from SHiP_RunManager import SHiP_RunManager
 
-punctuation = '!,.:;?'
-
-
-class RunAborted(Exception):
-    pass
+# punctuation = '!,.:;?'
 
 
-class RunStopped(Exception):
-    pass
+# class RunAborted(Exception):
+#     pass
+# 
+# 
+# class RunStopped(Exception):
+#     pass
 
-class run_control():
+class run_control(object):
     
-    def __init__(self,dispatcher_addr,converter_addr, configuration, partitionID):       
-        self._cancel_functions = None
-        self.connect_cancel(["abort"])
+    def __init__(self,dispatcher_addr,converter_addr, configuration, partitionID):    
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - [%(levelname)-8s] (%(threadName)-10s) %(message)s')   
+#         self._cancel_functions = None
+#         self.connect_cancel(["abort"])
         self.status = 0
         self.enabled = True
         self.abort_run = Event()
@@ -40,7 +42,7 @@ class run_control():
         self.disp_addr = dispatcher_addr
         self.converter_socket_addr = converter_addr
         self.pybar_conf = configuration
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - [%(levelname)-8s] (%(threadName)-10s) %(message)s')
+        
         self.commands = {'SoR','EoR','SoS','EoS','Enable','Disable','Stop'}
         self.partitionID = int(partitionID,16) # '0X0802' from 0800 to 0802 how to get this from scan instance?
         self.DetName = 'Pixels' + partitionID[5:] + '_LocDaq_' + partitionID[2:]
@@ -54,43 +56,43 @@ class run_control():
         self.special_header['timeExtent'] = 0
         self.special_header['flags'] = 0
         
-    def _signal_handler(self, signum, frame):
-        signal.signal(signal.SIGINT, signal.SIG_DFL)  # setting default handler... pressing Ctrl-C a second time will kill application
-        self.handle_cancel(msg='Pressed Ctrl-C')    
+#     def _signal_handler(self, signum, frame):
+#         signal.signal(signal.SIGINT, signal.SIG_DFL)  # setting default handler... pressing Ctrl-C a second time will kill application
+#         self.handle_cancel(msg='Pressed Ctrl-C')    
     
     
-    def connect_cancel(self, functions):
-        '''Run given functions when a run is cancelled.'''
-        self._cancel_functions = []
-        for func in functions:
-            if isinstance(func, basestring) and hasattr(self, func) and callable(getattr(self, func)):
-                self._cancel_functions.append(getattr(self, func))
-            elif callable(func):
-                self._cancel_functions.append(func)
-            else:
-                raise ValueError("Unknown function %s" % str(func))
+#     def connect_cancel(self, functions):
+#         '''Run given functions when a run is cancelled.'''
+#         self._cancel_functions = []
+#         for func in functions:
+#             if isinstance(func, basestring) and hasattr(self, func) and callable(getattr(self, func)):
+#                 self._cancel_functions.append(getattr(self, func))
+#             elif callable(func):
+#                 self._cancel_functions.append(func)
+#             else:
+#                 raise ValueError("Unknown function %s" % str(func))
     
     
-    def abort(self, msg=None):
-        '''Aborting a run. Control for loops. Immediate stop/abort.
-        The implementation should stop a run ASAP when this event is set. The run is considered incomplete.
-        '''
-        if not self.abort_run.is_set():
-            if msg:
-                logging.error('%s%s Aborting run...', msg, ('' if msg[-1] in punctuation else '.'))
-            else:
-                logging.error('Aborting run...')
-        self.abort_run.set()
-        self.stop_run.set()  # set stop_run in case abort_run event is not used    
+#     def abort(self, msg=None):
+#         '''Aborting a run. Control for loops. Immediate stop/abort.
+#         The implementation should stop a run ASAP when this event is set. The run is considered incomplete.
+#         '''
+#         if not self.abort_run.is_set():
+#             if msg:
+#                 logging.error('%s%s Aborting run...', msg, ('' if msg[-1] in punctuation else '.'))
+#             else:
+#                 logging.error('Aborting run...')
+#         self.abort_run.set()
+#         self.stop_run.set()  # set stop_run in case abort_run event is not used    
         
         
-    def handle_cancel(self, **kwargs):
-        '''Cancelling a run.
-        '''
-        for func in self._cancel_functions:
-            f_args = getargspec(func)[0]
-            f_kwargs = {key: kwargs[key] for key in f_args if key in kwargs}
-            func(**f_kwargs)
+#     def handle_cancel(self, **kwargs):
+#         '''Cancelling a run.
+#         '''
+#         for func in self._cancel_functions:
+#             f_args = getargspec(func)[0]
+#             f_kwargs = {key: kwargs[key] for key in f_args if key in kwargs}
+#             func(**f_kwargs)
     
     
     def cycle_ID(self):
@@ -112,7 +114,7 @@ class run_control():
             self.ch_com.send_me_always()
         
     
-    def run(self):
+    def receive(self):
         ''' 
         main loop for reception and execution of commands.
         starts threads corresponding to the command recieved.
@@ -127,7 +129,7 @@ class run_control():
             converter = ship_data_converter.DataConverter(pybar_addr = self.converter_socket_addr, partitionID = self.partitionID)
             converter.name = 'DataConverter'
             converter.daemon = True
-            runmngr = RunManager(self.pybar_conf)
+            RunManager(self.pybar_conf)
 #             runmngr.daemon = True
             while True:
                 if self.status >=0 and self.ch_com.status >=0 :
@@ -152,21 +154,23 @@ class run_control():
                                 if not converter.is_alive():
                                     converter.start()
                                 else: converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
+                                converter.cycle_ID = 
+                                converter.run_number = run_number
                                 #send special SoR header
                                 self.special_header['frameTime'] = 0xFF005C01
                                 self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                                 #start pybar trigger scan
-                                runmngr.run_run(ThresholdScan, use_thread=True)
+                                scan_thread = RunManager.run_run(ThresholdScan, use_thread=True, catch_exception=True)
 #                                 scan_thread = runmngr.run_run(ExtTriggerScanSHiP, run_conf={'scan_timeout': 86400, 'max_triggers':0, 
 #                                                                                             'no_data_timeout':0, 'ship_run_number': run_number}, 
 #                                                                                             use_thread=True) # TODO: how start pyBAR in thread?
-#                                 scan_thread(timeout = 10)
+                                scan_thread(0.1)
                                 self.ch_com.send_done('SoR',self.partitionID, self.status ) 
                             elif self.command == 'EoR': # stop existing pyBAR ExtTriggerScanShiP
                                 logging.info('Recieved EoR command')
-                                if runmngr.current_run.__class__.__name__ == 'ThresholdScan':
+                                if RunManager.current_run.__class__.__name__ == 'ThresholdScan':
 #                                     scan_thread(timeout = 0.01)
-                                    runmngr.current_run.stop(msg='ExtTriggerScanSHiP') # TODO: check how to properly stop pyBAR RunManager
+                                    RunManager.current_run.stop(msg='ExtTriggerScanSHiP') # TODO: check how to properly stop pyBAR RunManager
 
                                 else:
                                     logging.error('Recieved EoR command, but no ExtTriggerScanSHiP running')
@@ -204,8 +208,10 @@ class run_control():
                 else:
                     self.status = -1
                     raise RuntimeError('Undefined state')
+                scan_thread(0.01)
             converter.stop()
-            runmngr.abort()
+            print "hello"
+            RunManager.abort()
             logging.error('Loop exited')
         except Exception as e:
             logging.error('Exception, terminating')
@@ -238,7 +244,7 @@ if __name__ == '__main__':
                       configuration,
                       partitionID)
     
-    rec.run()
+    rec.receive()
 
     
 #     rec = threading.Thread(name = 'reciever', target = run_control('127.0.0.1', '/home/niko/git/pyBAR/pybar/configuration.yaml'))
