@@ -37,7 +37,7 @@ class run_control():
         self.enabled = True
         self.abort_run = Event()
         self.stop_run = Event()
-        self.socket_addr = dispatcher_addr
+        self.disp_addr = dispatcher_addr
         self.converter_socket_addr = converter_addr
         self.pybar_conf = configuration
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - [%(levelname)-8s] (%(threadName)-10s) %(message)s')
@@ -45,10 +45,14 @@ class run_control():
         self.partitionID = int(partitionID,16) # '0X0802' from 0800 to 0802 how to get this from scan instance?
         self.DetName = 'Pixels' + partitionID[5:] + '_LocDaq_' + partitionID[2:]
         self.ch_com = ch_communicator()
-        self.connect_CH(self.socket_addr,self.DetName)
+        self.connect_CH(self.disp_addr,self.DetName)
         self.cmd = []
         self.command = 'none'
-
+        self.special_header = np.empty(shape=(1,), dtype= FrHeader)
+        self.special_header['size'] = 16
+        self.special_header['partID'] = self.partitionID
+        self.special_header['timeExtent'] = 0
+        self.special_header['flags'] = 0
         
     def _signal_handler(self, signum, frame):
         signal.signal(signal.SIGINT, signal.SIG_DFL)  # setting default handler... pressing Ctrl-C a second time will kill application
@@ -95,15 +99,15 @@ class run_control():
         return int((datetime.datetime.now() - start_date).total_seconds()*5)
     
     
-    def connect_CH(self,socket_addr,DetName):
+    def connect_CH(self,disp_addr,DetName):
         ''' connect to dispatcher, DetName needed for identification. only needed at initial connection'''
-        self.ch_com.init_link(socket_addr, subscriber=None)
+        self.ch_com.init_link(disp_addr, subscriber=None)
         if self.ch_com.status < 0:
-            logging.error('Could not connect to host %s' % socket_addr)
+            logging.error('Could not connect to host %s' % disp_addr)
         elif self.ch_com.status >= 0 :
             self.ch_com.subscribe(DetName)
         if self.ch_com.status < 0:
-            logging.error('Could not subscribe with name=%s to host %s' % (DetName, socket_addr))
+            logging.error('Could not subscribe with name=%s to host %s' % (DetName, disp_addr))
         elif self.ch_com.status >= 0 :
             self.ch_com.send_me_always()
         
@@ -120,24 +124,22 @@ class run_control():
 #             signal.signal(signal.SIGINT, signal_handler)
 #             signal.signal(signal.SIGTERM, signal_handler)
         try:
-            converter = ship_data_converter.DataConverter(self.converter_socket_addr, self.partitionID)
+            converter = ship_data_converter.DataConverter(pybar_addr = self.converter_socket_addr, partitionID = self.partitionID)
             converter.name = 'DataConverter'
             converter.daemon = True
             runmngr = RunManager(self.pybar_conf)
-            runmngr.daemon = True
-            joinmngr = None
+#             runmngr.daemon = True
             while True:
                 if self.status >=0 and self.ch_com.status >=0 :
                     self.status = ch.get_head_wait('DAQCMD', self.ch_com.cmdsize)
                     if self.status >=0 and self.ch_com.status >=0 :
-                        logging.info('Recieved header')
                         self.cmd = self.ch_com.get_cmd() # recieved command contains command word [0] and additional info [1]... different for each case
                         if len(self.cmd) > 1:
                             self.command = self.cmd[0]
                         elif len(self.cmd)==0 or len(self.cmd) ==1 :
                             self.command = self.cmd
                         if self.command in self.commands and self.ch_com.status >=0:
-                            self.ch_com.send_ack(tag='DAQACK',msg = '%s %04X %s' %(self.command, self.partitionID, self.socket_addr)) # acknowledge command
+                            self.ch_com.send_ack(tag='DAQACK',msg = '%s %04X %s' %(self.command, self.partitionID, self.disp_addr)) # acknowledge command
                             if self.command == 'Enable': # enable detector partition
                                 self.enabled = True
                             elif self.command == 'Disable': #disable detector partition
@@ -147,46 +149,50 @@ class run_control():
                                     run_number = self.cmd[1]
                                 else:
                                     run_number = None
-                                converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
                                 if not converter.is_alive():
                                     converter.start()
+                                else: converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
                                 #send special SoR header
-                                header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=self.cycle_ID(), trigger_timestamp=0xFF005C01, bcids=0, flag=0)
-                                self.ch_com.send_data_numpy(tag = 'RAW_0802', header, hits=0)
+                                self.special_header['frameTime'] = 0xFF005C01
+                                self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                                 #start pybar trigger scan
-                                joinmngr = runmngr.run_run(ExtTriggerScanSHiP, run_conf={'scan_timeout': 86400, 'max_triggers':0, 'ship_run_number': run_number}, use_thread=True) # TODO: how to get run number to pyBAR ?
-                                
+                                runmngr.run_run(ThresholdScan, use_thread=True)
+#                                 scan_thread = runmngr.run_run(ExtTriggerScanSHiP, run_conf={'scan_timeout': 86400, 'max_triggers':0, 
+#                                                                                             'no_data_timeout':0, 'ship_run_number': run_number}, 
+#                                                                                             use_thread=True) # TODO: how start pyBAR in thread?
+#                                 scan_thread(timeout = 10)
                                 self.ch_com.send_done('SoR',self.partitionID, self.status ) 
                             elif self.command == 'EoR': # stop existing pyBAR ExtTriggerScanShiP
                                 logging.info('Recieved EoR command')
-                                if runmngr.current_run.__class__.__name__ == 'ExtTriggerScanSHiP' and joinmngr != None:
+                                if runmngr.current_run.__class__.__name__ == 'ThresholdScan':
+#                                     scan_thread(timeout = 0.01)
                                     runmngr.current_run.stop(msg='ExtTriggerScanSHiP') # TODO: check how to properly stop pyBAR RunManager
-                                    joinmngr(timeout = 0.01)
+
                                 else:
                                     logging.error('Recieved EoR command, but no ExtTriggerScanSHiP running')
                                 if converter.is_alive():
                                     converter.reset(cycleID = self.cycle_ID(), msg='EoR command, resetting DataConverter') # reset interpreter and event counter
-                                    logging.info('DataConverter has been reset')
                                 else:
                                     logging.error('Recieved EoR command to reset converter, but no converter running')
                                 # send special EoR header
-                                header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=self.cycle_ID(), trigger_timestamp=0xFF005C02, bcids=0, flag=0)
-                                self.ch_com.send_data_numpy(tag = 'RAW_0802', header, hits=0)
+                                self.special_header['frameTime'] = 0xFF005C02
+                                self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                                 self.ch_com.send_done('EoR',self.partitionID, self.status)
                             elif self.command == 'SoS': # new spill. trigger counter will be reset by hardware signal. The software command triggers an empty header
                                 if len(self.cmd) > 1:
-                                    cycleID = int(self.cmd[1])
+                                    cycleID = np.uint32(self.cmd[1])
                                 else:
                                     cycleID = 0 #self.cycle_ID()
                                 logging.info('Recieved SoS header, cycleID = %s' % cycleID)
         #                         if central_cycleID != self.cycle_ID():
-                                header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=cycleID, trigger_timestamp=0xFF005C03, bcids=0, flag=0)
-                                self.ch_com.send_data_numpy(tag = 'RAW_0802', header, hits=0)
+                                converter.cycle_ID = cycleID
+                                self.special_header['frameTime'] = 0xFF005C03
+                                self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                                 self.ch_com.send_done('SoS',self.partitionID, converter.total_events) # TODO: make sure send done is called after last event is converted
                             elif self.command == 'EoS': # trigger EoS header, sent after last event
                                 logging.info('recieved EoS, local cycleID:%s' % self.cycle_ID())
-                                header = ship_data_converter.build_header(n_hits=0, partitionID=self.partitionID, cycleID=self.cycleID(), trigger_timestamp=0xFF005C04, bcids=0, flag=0) # TODO: send EoS header after last event from spill
-                                self.ch_com.send_data_numpy(tag = 'RAW_0802', header, hits=0)
+                                self.special_header['frameTime'] = 0xFF005C04 # TODO: send EoS header after last event from spill
+                                self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                                 self.ch_com.send_done('EoS', self.partitionID, self.status)
                             elif self.command == 'Stop':
                                 logging.info('Recieved Stop! Leaving loop, aborting all functions')
@@ -207,88 +213,6 @@ class run_control():
             
 
 
-
-class ch_communicator():
-    
-    def __init__(self):
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - [%(levelname)-8s] (%(threadName)-10s) %(message)s')
-        self.status = 0
-#         self.connect(socket_addr,subscriber = 'Pixels') # tags identify the type of information which is transmitted: DAQCMD, DAQACK DAQDONE
-        self.cmd = np.char.asarray(['0']*127, order={'C'}) # controlHost commands are written to this variable, size given in c 'chars'
-        self.cmdsize = np.ascontiguousarray(np.int8(self.cmd.nbytes)) # maximum size of numpy array in bytes. Necessary for cmd reception, ControlHost needs to know the max. cmd size.
-
-        
-    def init_link(self, socket_addr, subscriber):
-        if socket_addr == None:
-            socket_addr = '127.0.0.1'
-#         self.status = ch.init_disp(socket_addr, 'a ' + subscriber)
-        self.status = ch.init_disp_2way(socket_addr,'w dummy','a DAQCMD')
-        if self.status < 0:
-            logging.error('Connection to %s failed\n status = %s' % (socket_addr, self.status))
-        elif self.status >= 0:
-            logging.info('Connected to %s' % socket_addr)
-    
-    
-    def subscribe(self,DetName):
-        self.status = ch.subscribe(DetName)
-        if self.status >= 0: 
-            logging.info('Subscribed to Host with name=%s'%DetName)
-        elif self.status < 0:
-            logging.error('Could not subscribe to host')
-        
-    def send_me_always(self):
-        self.status = ch.accept_at_all_times()
-        if self.status >= 0:
-            logging.info('Send me always activated')
-        if self.status < 0:
-            logging.error('Send me always subscription was declined')
-    
-    def get_cmd(self):
-        self.status , cmd = ch.rec_cmd()
-        if self.status < 0:
-            logging.warning('Command could not be recieved')
-        elif self.status >= 0 :
-            logging.info('Recieved command:%s' % cmd)
-        return cmd.split(' ')
-    
-    
-    def get_data(self,tag):
-        self.status = ch.check_head(tag,self.cmdsize)
-        if self.status < 0:
-            logging.warning('Message head is broken')
-        elif self.status >= 0:
-            self.status, data = ch.rec_data(self.cmd,self.cmdsize)
-            logging.info('Recieved command: %s' % data)
-            if self.status < 0:
-                logging.warning('Command is broken')
-        return data
-    
-    
-    def send_data(self, tag, header, hits):
-#         logging.info('sending data package with %s byte' % length)
-        self.status = ch.send_fulldata_numpy(tag, header, hits) # TODO: case only header, no hits. 
-        if self.status < 0:
-            logging.error('Sending package failed')
-        
-        
-    def send_ack(self,tag,msg):
-        self.status = ch.send_fullstring(tag, msg)
-        if self.status < 0:
-            logging.error('Error during acknowledge')
-        elif self.status >=0:
-            logging.info('Acknowledged command=%s with tag=%s' % (msg,tag))
-            
-            
-    def send_done(self,cmd, partitionID, status):
-        self.status= ch.send_fullstring('DAQDONE', '%s %04X %s' %(cmd, partitionID, status))
-        if self.status < 0:
-            logging.error('Could not send DAQDONE')
-        elif self.status >= 0:
-            logging.info('DAQDONE msg sent')
-
-
-
-    
 if __name__ == '__main__':
     
     usage = "Usage: %prog dispatcher_addr converter_addr configuration.yaml partitionID"

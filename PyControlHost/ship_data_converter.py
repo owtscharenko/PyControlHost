@@ -4,14 +4,15 @@ import numpy as np
 import datetime
 from numba import njit
 import cProfile
-import multiprocessing
+import threading
 import logging
+from ctypes import c_ushort, c_int,Structure
 
 from build_binrep import hit_to_binary
 from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
 from pybar_fei4_interpreter.data_histograming import PyDataHistograming
 # import run_control.run_control as run_control
-from run_control import ch_communicator
+from  ControlHost import ch_communicator, FrHeader, Hit
 
 
 
@@ -134,22 +135,29 @@ def decode_second_dataword(dataword):
     return tot, moduleID, flag, rel_BCID
 
             
-class DataConverter(multiprocessing.Process):
+class DataConverter(threading.Thread):
 
-    def __init__(self, socket_addr, partitionID):
-        multiprocessing.Process.__init__(self)
+    def __init__(self, pybar_addr, partitionID, disp_addr=None):
+        
+        threading.Thread.__init__(self)
 #         self.connect(socket_addr)
         self.n_readout = 0
         self.n_modules = 8
-        self.socket_addr = socket_addr
-        self._stop_readout = multiprocessing.Event()  # exit signal
+        self.socket_addr = pybar_addr
+        self._stop_readout = threading.Event()  # exit signal
+        self.EoR_flag = threading.Event()
+        self.EoS_flag = threading.Event()
         self.setup_raw_data_analysis()
-        self.reset_lock = multiprocessing.Lock()  # exit signal
+        self.reset_lock = threading.Lock()  # exit signal
         self.kill_received = False
         self.ch = ch_communicator()
         self.total_events = 0
         self.cycle_ID = 0
-        self.partitionID = partitionID
+        self.partitionID = partitionID # '0X0802' from 0800 to 0802 how to get this from scan instance?
+        self.DetName = 'Pixels' + hex(partitionID)[4:] + '_LocDaq_0' + hex(partitionID)[2:]
+        self.RAW_data_tag = 'RAW_0' + hex(partitionID)[2:]
+        if disp_addr:
+            self.ch.connect_CH(disp_addr,self.DetName)
         self.multi_chip_event_dtype =[('event_number', '<i8'),
                                         ('trigger_number', '<u4'),
                                         ('trigger_time_stamp', '<u4'), 
@@ -207,6 +215,9 @@ class DataConverter(multiprocessing.Process):
             logging.info('last cycleID=%s'% self.cycle_ID)
             self.cycle_ID = cycleID
             self._stop_readout.clear()
+            self.EoR_flag.clear()
+            self.EoS_flag.clear()
+            logging.info('DataConverter has been reset')
 
 
     def analyze_raw_data(self, raw_data, module):
@@ -315,21 +326,25 @@ class DataConverter(multiprocessing.Process):
 if __name__ == '__main__':
    
     usage = "Usage: %prog ADDRESS"
-    description = "ADDRESS: Remote address of the sender (default: tcp://127.0.0.1:5678)."
+    description = "ADDRESS: Remote address of the sender (default: tcp://127.0.0.1:5678).\n disp_addr: address of dispatcher to send data to (default 127.0.0.1) \n partitionID : identifier for ControlHost (default= 0x0802)"
     parser = OptionParser(usage, description=description)
     options, args = parser.parse_args()
     if len(args) == 0:
         socket_addr = 'tcp://127.0.0.1:5678'
-    elif len(args) == 1:
+        disp_addr = '127.0.0.1'
+        partitionID = "0X0802"
+    elif len(args) == 3:
         socket_addr = args[0]
+        disp_addr = args[1]
+        partitionID = args[2]
     else:
         parser.error("incorrect number of arguments")
      
-    CH = ch_communicator()
     pr = cProfile.Profile()
      
     try:
-        DataConverter(socket_addr=socket_addr)
+        converter = DataConverter(socket_addr=socket_addr,disp_addr = disp_addr, partitionID = partitionID)
+        converter.start()
     except (KeyboardInterrupt, SystemExit):
         print "keyboard interrupt"
         pr.disable()
