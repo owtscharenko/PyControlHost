@@ -24,24 +24,12 @@ cdef extern from 'utils.h':
         DataFrameHeader()
     cdef cppclass Hit:
         Hit()
-    unsigned short* build_EvtFrame(DataFrameHeader*& header, Hit*& hits, const unsigned int head_length, const unsigned int hits_length)
+    unsigned short* build_EvtFrame(DataFrameHeader*& header, Hit*& hits, const unsigned int head_bytes, const unsigned int hits_bytes)
     unsigned short* build_special_header(DataFrameHeader*& header, const unsigned int head_length)
     
 cdef int buf(cnp.ndarray a):
     return 6
 
-
-# cdef void &build_EvtFrame(DataFrameHeader*& header, Hit*& hits, unsigned int head_length, unsigned int hits_length):
-#     # head_lenght and hits_length are size in byte of the respective array
-#     # join header and hits array by memcopy, then send as one memory block
-#     #allocate contiguous part of memory of correct size
-#     cdef bitData* path
-#     path = malloc(head_length + hits_length)
-#     # now: copy header to beginning of path
-#     memcpy(path, header, head_length)
-#     # copy hits to end of header
-#     memcpy(&path[head_length],hits, hits_length)
-#     return path
 
 def init_disp(const char *host, const char *subscr):
     return init_disp_link(host, subscr)
@@ -67,11 +55,10 @@ def send_fulldata(const char *tag, buf, int size):
     return put_fulldata(tag, <const void *>buf.data, size)
 
 def send_fulldata_numpy(const char *tag, ndarray head, ndarray hits):
-    cdef int head_size = head.nbytes
-    cdef int hits_size = hits.nbytes # 4* hits.shape[0]
-    cdef int size = head_size + hits_size
-    cdef unsigned short *frame = build_EvtFrame(<DataFrameHeader*&> head.data, <Hit*&>  hits.data, head_size, hits_size)
-#     print "frame size c : %s Byte" %size
+    cdef int head_bytes = head.nbytes
+    cdef int hits_bytes = hits.nbytes # 4* hits.shape[0]
+    cdef int size = head_bytes + hits_bytes
+    cdef unsigned short *frame = build_EvtFrame(<DataFrameHeader*&> head.data, <Hit*&>  hits.data, head_bytes, hits_bytes)
     return put_fulldata(tag, <const void *>frame, size)
 
 def send_header_numpy(const char *tag, ndarray head):

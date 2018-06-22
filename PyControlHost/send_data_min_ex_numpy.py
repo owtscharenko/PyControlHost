@@ -99,8 +99,11 @@ class ch_communicator():
         if self.status < 0:
             logging.error('Sending package failed')
         
-    def send_data_conc(self,header,hits):
-        ch.send_fulldata_numpy('RAW_0802', header,hits)
+    def send_data_numpy(self,header,hits):
+        if  isinstance(hits,np.ndarray):
+            ch.send_fulldata_numpy('RAW_0802', header, hits)
+        else:
+            ch.send_header_numpy('RAW_0802', header)
         
         
     def send_ack(self,tag,msg):

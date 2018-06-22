@@ -42,22 +42,22 @@ typedef struct Hit{
 //	return res;
 //	}
 
-unsigned short *build_EvtFrame(DataFrameHeader*& header, Hit*& hits, const unsigned int& head_length, const unsigned int& hits_length)
+unsigned short *build_EvtFrame(DataFrameHeader*& header, Hit*& hits, const unsigned int& head_bytes, const unsigned int& hits_bytes)
 	{
 //  head_lenght and hits_length are size in byte of the respective array
 //  join header and hits array by memcopy, then send as one memory block
 //  allocate contiguous part of memory of correct size
 
 	unsigned short *path;
-	path = (unsigned short *)malloc(head_length + hits_length);
+	path = (unsigned short *)malloc(head_bytes + hits_bytes);
 	//  now: copy header to beginning of path
-	memcpy(path, header, head_length);
+	memcpy(path, header, head_bytes);
 	//  copy hits to end of header
-	memcpy(&path[8],hits, hits_length);
+//	printf("end of header in memcopy %i" , head_bytes/sizeof(unsigned short));
+	memcpy(&path[head_bytes/sizeof(unsigned short)],hits, hits_bytes);
 
 //	printf("size of unsigned short %i\n" , sizeof(unsigned short));
 //    printf("header: %p %p %p %p %p %p %p %p\n", path[0],path[1],path[2],path[3],path[4],path[5],path[6],path[7]);
-//    printf("hits: %p %p %p %p %p %p %p\n", path[8],path[9],path[10],path[11],path[12],path[13],path[14],path[15]);
 //    printf("first hit: %p\n", % path[head_length])
 //    printf("memcp size: %i Byte\n",head_length + hits_length);
 	return path;

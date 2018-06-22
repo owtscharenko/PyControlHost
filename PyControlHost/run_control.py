@@ -16,6 +16,7 @@ import numpy as np
 import control_host_coms as ch
 from pybar import *
 import ship_data_converter
+from  ControlHost import ch_communicator, FrHeader
 
 punctuation = '!,.:;?'
 
