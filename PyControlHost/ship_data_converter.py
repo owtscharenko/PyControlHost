@@ -4,11 +4,9 @@ import numpy as np
 import datetime
 from numba import njit
 import cProfile
-import threading
+import multiprocessing
 import logging
-from ctypes import c_ushort, c_int,Structure
 
-from build_binrep import hit_to_binary
 from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
 from pybar_fei4_interpreter.data_histograming import PyDataHistograming
 # import run_control.run_control as run_control
@@ -135,24 +133,27 @@ def decode_second_dataword(dataword):
     return tot, moduleID, flag, rel_BCID
 
             
-class DataConverter(threading.Thread):
+class DataConverter(multiprocessing.Process):
 
     def __init__(self, pybar_addr, partitionID, disp_addr=None):
         
-        threading.Thread.__init__(self)
+        multiprocessing.Process.__init__(self)
 #         self.connect(socket_addr)
         self.n_readout = 0
         self.n_modules = 8
         self.socket_addr = pybar_addr
-        self._stop_readout = threading.Event()  # exit signal
-        self.EoR_flag = threading.Event()
-        self.EoS_flag = threading.Event()
+        self._stop_readout = multiprocessing.Event()  # exit signal
+        self.EoR_flag = multiprocessing.Event()
+        self.EoS_flag = multiprocessing.Event()
         self.setup_raw_data_analysis()
-        self.reset_lock = threading.Lock()  # exit signal
+        self.reset_lock = multiprocessing.Lock()  # exit signal
         self.kill_received = False
         self.ch = ch_communicator()
         self.total_events = 0
-        self.cycle_ID = 0
+        self.start_date = datetime.datetime(2015, 04, 8, 00, 00)
+        self.cycle_ID = multiprocessing.Value(np.uint64,0)
+        self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID /5.)).strftime("%Y_%m_%d_%H_%M_%S")
+        self.run_number = multiprocessing.Value(np.uint32,0)
         self.partitionID = partitionID # '0X0802' from 0800 to 0802 how to get this from scan instance?
         self.DetName = 'Pixels' + hex(partitionID)[4:] + '_LocDaq_0' + hex(partitionID)[2:]
         self.RAW_data_tag = 'RAW_0' + hex(partitionID)[2:]
@@ -178,8 +179,7 @@ class DataConverter(threading.Thread):
 
     def cycle_ID(self):
         ''' counts in 0.2s steps from 08. April 2015 '''
-        start_date = datetime.datetime(2015, 04, 8, 00, 00)
-        return np.uint32((datetime.datetime.now() - start_date).total_seconds() * 5)
+        return np.uint32((datetime.datetime.now() - self.start_date).total_seconds() * 5)
 
 
     def setup_raw_data_analysis(self):
@@ -219,7 +219,14 @@ class DataConverter(threading.Thread):
             self.EoS_flag.clear()
             logging.info('DataConverter has been reset')
 
-
+    
+    def SoS_reset(self): # TODO: implement SoS and EoS reset.
+        pass
+    
+    def EoS_reset(self):
+        pass
+    
+    
     def analyze_raw_data(self, raw_data, module):
         return self.interpreters[module].interpret_raw_data(raw_data)
 
@@ -307,28 +314,14 @@ class DataConverter(threading.Thread):
                             self.data_header['frameTime'] = event_table['trigger_time_stamp'][0]
                             self.data_header['timeExtent'] = 15
                             self.data_header['flags'] = 0
-#                             self.data_header = build_header( 
-#                                                             n_hits=channelID.shape[0], partitionID=self.partitionID, cycleID=self.cycle_ID,
-#                                                             trigger_timestamp=event_table['trigger_time_stamp'][0]
-#                                                             )
-#                             self.data_header = [build_header( 
-#                                                             n_hits=len(self.ch_hit_data)/2, partitionID=self.partitionID, cycleID=self.cycleID,
-#                                                             trigger_timestamp=event_table['trigger_timestamp'][0]
-#                                                             )
-#                                                 ] #TODO: check trigger_timestamp.
-#                             self.ch.send_data(np.ascontiguousarray(self.data_header + self.ch_hit_data)) 
+
                             self.ch.send_data(self.RAW_data_tag, self.data_header, self.ch_hit_data)
+                            
+                            with open("./RUN_%s/%s.txt" % (self.run_number, self.file_date),'a+') as spill_file: # save converted hits + header for each spill in separate file
+                                np.savetxt(spill_file, self.data_header)
+                                np.savetxt(spill_file, self.ch_hit_data)
+                                
                         self.total_events += event_indices.shape[0]
-#                         if self.EoR_flag:
-#                             self.data_header = np.empty(shape=(1,), dtype= FrHeader)
-#                             self.data_header['size'] = channelID.nbytes + 16
-#                             self.data_header['partID'] = self.partitionID
-#                             self.data_header['cycleID'] = self.cycle_ID
-#                             self.data_header['frameTime'] = event_table['trigger_time_stamp'][0]
-#                             self.data_header['timeExtent'] = 15
-#                             self.data_header['flags'] = 0
-#                             self.ch.send_data(self.RAW_data_tag, self.data_header, None)
-#                         logging.info('total events %s' % self.total_events)
                         
                         
     def stop(self):

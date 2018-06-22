@@ -6,7 +6,7 @@ import logging
 import datetime
 import threading
 import multiprocessing
-from multiprocessing import Event
+from multiprocessing import Event, Process
 from optparse import OptionParser
 from inspect import getmembers, isclass, getargspec
 
@@ -187,6 +187,7 @@ class run_control(object):
                                     cycleID = np.uint32(self.cmd[1])
                                 else:
                                     cycleID = 0 #self.cycle_ID()
+                                converter.cycle_ID = cycleID
                                 logging.info('Recieved SoS header, cycleID = %s' % cycleID)
         #                         if central_cycleID != self.cycle_ID():
                                 converter.cycle_ID = cycleID
