@@ -297,25 +297,44 @@ class DataConverter(threading.Thread):
                         _, event_indices = np.unique(multimodule_hits['event_number'], return_index = True) # count number of events in array
                         
                         for event_table in np.array_split(multimodule_hits, event_indices)[1:]: # split hit array by events. 1st list entry is empty
-                            channelID = np.bitwise_or(event_table['row']<<7,event_table['column'],order='C',dtype='<u2')
-                            ch_2nd_dataword = np.bitwise_or(np.bitwise_or(event_table['tot']<<4,event_table['moduleID'])<<8,
-                                                                      np.bitwise_or(0<<4,event_table['relative_BCID']),order='C',dtype='<u2')
+                            channelID = np.bitwise_or(event_table['row']<<7,event_table['column'],order='C',dtype='uint16')
+                            hit_data = np.bitwise_or(np.bitwise_or(event_table['tot']<<4,event_table['moduleID'])<<8,
+                                                                      np.bitwise_or(0<<4,event_table['relative_BCID']),order='C',dtype='uint16')
 #                             self.ch_hit_data = process_data_numba(event_table) # TODO: check moduleID from datastream
-                            self.ch_hit_data = np.vstack((channelID,ch_2nd_dataword)).T
+#                             self.ch_hit_data = np.vstack((channelID,hit_data)).T
+                            self.ch_hit_data = np.empty(channelID.shape[0], dtype = Hit)
+                            self.ch_hit_data["channelID"] = channelID
+                            self.ch_hit_data["hit_data"] = hit_data
                             # each event needs a frame header
-                            self.data_header = build_header( 
-                                                            n_hits=channelID.shape[0], partitionID=self.partitionID, cycleID=self.cycle_ID,
-                                                            trigger_timestamp=event_table['trigger_time_stamp'][0]
-                                                            )
+                            self.data_header = np.empty(shape=(1,), dtype= FrHeader)
+                            self.data_header['size'] = channelID.nbytes + 16
+                            self.data_header['partID'] = self.partitionID
+                            self.data_header['cycleID'] = self.cycle_ID
+                            self.data_header['frameTime'] = event_table['trigger_time_stamp'][0]
+                            self.data_header['timeExtent'] = 15
+                            self.data_header['flags'] = 0
+#                             self.data_header = build_header( 
+#                                                             n_hits=channelID.shape[0], partitionID=self.partitionID, cycleID=self.cycle_ID,
+#                                                             trigger_timestamp=event_table['trigger_time_stamp'][0]
+#                                                             )
 #                             self.data_header = [build_header( 
 #                                                             n_hits=len(self.ch_hit_data)/2, partitionID=self.partitionID, cycleID=self.cycleID,
 #                                                             trigger_timestamp=event_table['trigger_timestamp'][0]
 #                                                             )
 #                                                 ] #TODO: check trigger_timestamp.
 #                             self.ch.send_data(np.ascontiguousarray(self.data_header + self.ch_hit_data)) 
-                            self.ch.send_data(np.ascontiguousarray((self.data_header,self.ch_hit_data)))
+                            self.ch.send_data(self.RAW_data_tag, self.data_header, self.ch_hit_data)
                         self.total_events += event_indices.shape[0]
-                        logging.info('total events %s' % self.total_events)
+#                         if self.EoR_flag:
+#                             self.data_header = np.empty(shape=(1,), dtype= FrHeader)
+#                             self.data_header['size'] = channelID.nbytes + 16
+#                             self.data_header['partID'] = self.partitionID
+#                             self.data_header['cycleID'] = self.cycle_ID
+#                             self.data_header['frameTime'] = event_table['trigger_time_stamp'][0]
+#                             self.data_header['timeExtent'] = 15
+#                             self.data_header['flags'] = 0
+#                             self.ch.send_data(self.RAW_data_tag, self.data_header, None)
+#                         logging.info('total events %s' % self.total_events)
                         
                         
     def stop(self):
