@@ -95,7 +95,7 @@ class ch_communicator():
 #             logging.error('Sending package failed')
             
     def send_data(self, tag, header,hits):
-        if hits:
+        if isinstance(hits,np.ndarray):
             self.status = ch.send_fulldata_numpy(tag, header, hits)
         else:
             self.status = ch.send_header_numpy(tag, header)

@@ -152,11 +152,15 @@ class DataConverter(multiprocessing.Process):
         self.total_events = 0
         self.start_date = datetime.datetime(2015, 04, 8, 00, 00)
         self.cycle_ID = multiprocessing.Value(np.uint64,0)
-        self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID /5.)).strftime("%Y_%m_%d_%H_%M_%S")
+        self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value /5.)).strftime("%Y_%m_%d_%H_%M_%S")
         self.run_number = multiprocessing.Value(np.uint32,0)
         self.partitionID = partitionID # '0X0802' from 0800 to 0802 how to get this from scan instance?
-        self.DetName = 'Pixels' + hex(partitionID)[4:] + '_LocDaq_0' + hex(partitionID)[2:]
-        self.RAW_data_tag = 'RAW_0' + hex(partitionID)[2:]
+        if disp_addr: # in case of direct call of DataConverter, the partitionID is handed over as hex TODO: fix this behavior
+            self.DetName = 'Pixels' + partitionID[4:] + '_LocDaq_0' + partitionID[2:]
+            self.RAW_data_tag = 'RAW_0' + partitionID[2:]
+        else: 
+            self.DetName = 'Pixels' + hex(partitionID)[4:] + '_LocDaq_0' + hex(partitionID)[2:]
+            self.RAW_data_tag = 'RAW_0' + hex(partitionID)[2:]
         if disp_addr:
             self.ch.connect_CH(disp_addr,self.DetName)
         self.multi_chip_event_dtype =[('event_number', '<i8'),
@@ -286,43 +290,35 @@ class DataConverter(multiprocessing.Process):
                             module_hits['row'] = hits['row']
                             module_hits['tot'] = hits['tot']
                             module_hits['moduleID'] = module
-#                             if module == 0:
-#                                 pass
-#                             else:
-                            multimodule_hits = np.concatenate((multimodule_hits,module_hits))
-#                             multimodule_hits.append(module_hits)
-                        #check building of common event from all modules
-#                         multimodule_hits = module_hits # np.vstack(np.asarray(multimodule_hits))
-#                         multimodule_hits = np.asarray([multimodule_hits[0],multimodule_hits[1],multimodule_hits[2],multimodule_hits[3],
-#                                                        multimodule_hits[4],multimodule_hits[5],multimodule_hits[6],multimodule_hits[7]])
+                            
+                            multimodule_hits = np.concatenate((multimodule_hits,module_hits)) # TODO: check recovering of moduleID from datastream
+                        #TODO: check building of common event from all modules
                         _, event_indices = np.unique(multimodule_hits['event_number'], return_index = True) # count number of events in array
                         
-                        for event_table in np.array_split(multimodule_hits, event_indices)[1:]: # split hit array by events. 1st list entry is empty
+                        for event_table in np.array_split(multimodule_hits, event_indices)[1:]: # split hit array by events. 1st list entry is empty ?
                             channelID = np.bitwise_or(event_table['row']<<7,event_table['column'],order='C',dtype='uint16')
                             hit_data = np.bitwise_or(np.bitwise_or(event_table['tot']<<4,event_table['moduleID'])<<8,
                                                                       np.bitwise_or(0<<4,event_table['relative_BCID']),order='C',dtype='uint16')
-#                             self.ch_hit_data = process_data_numba(event_table) # TODO: check moduleID from datastream
-#                             self.ch_hit_data = np.vstack((channelID,hit_data)).T
                             self.ch_hit_data = np.empty(channelID.shape[0], dtype = Hit)
                             self.ch_hit_data["channelID"] = channelID
                             self.ch_hit_data["hit_data"] = hit_data
                             # each event needs a frame header
                             self.data_header = np.empty(shape=(1,), dtype= FrHeader)
                             self.data_header['size'] = channelID.nbytes + 16
-                            self.data_header['partID'] = self.partitionID
-                            self.data_header['cycleID'] = self.cycle_ID
+                            self.data_header['partID'] = 0x0802 # self.partitionID
+                            self.data_header['cycleID'] = self.cycle_ID.value
                             self.data_header['frameTime'] = event_table['trigger_time_stamp'][0]
                             self.data_header['timeExtent'] = 15
                             self.data_header['flags'] = 0
 
                             self.ch.send_data(self.RAW_data_tag, self.data_header, self.ch_hit_data)
                             
-                            with open("./RUN_%s/%s.txt" % (self.run_number, self.file_date),'a+') as spill_file: # save converted hits + header for each spill in separate file
+                            with open("./RUN_%s/%s.txt" % (self.run_number.value, self.file_date),'a+') as spill_file: # save converted hits + header for each spill in separate file
                                 np.savetxt(spill_file, self.data_header)
                                 np.savetxt(spill_file, self.ch_hit_data)
                                 
                         self.total_events += event_indices.shape[0]
-                        
+#                         logging.info("total events : %s" % self.total_events)
                         
     def stop(self):
         self._stop_readout.set()
@@ -349,7 +345,7 @@ if __name__ == '__main__':
     pr = cProfile.Profile()
      
     try:
-        converter = DataConverter(socket_addr=socket_addr,disp_addr = disp_addr, partitionID = partitionID)
+        converter = DataConverter(pybar_addr=socket_addr,disp_addr = disp_addr, partitionID = partitionID)
         converter.start()
     except (KeyboardInterrupt, SystemExit):
         print "keyboard interrupt"

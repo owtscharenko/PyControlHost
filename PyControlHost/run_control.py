@@ -151,10 +151,11 @@ class run_control(object):
                                     run_number = self.cmd[1]
                                 else:
                                     run_number = None
+                                if not os.path.exists("./RUN_%s/" % run_number):
+                                    os.makedirs("./RUN_%s/" % run_number)
                                 if not converter.is_alive():
                                     converter.start()
                                 else: converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
-                                converter.cycle_ID = 
                                 converter.run_number = run_number
                                 #send special SoR header
                                 self.special_header['frameTime'] = 0xFF005C01
@@ -171,7 +172,6 @@ class run_control(object):
                                 if RunManager.current_run.__class__.__name__ == 'ThresholdScan':
 #                                     scan_thread(timeout = 0.01)
                                     RunManager.current_run.stop(msg='ExtTriggerScanSHiP') # TODO: check how to properly stop pyBAR RunManager
-
                                 else:
                                     logging.error('Recieved EoR command, but no ExtTriggerScanSHiP running')
                                 if converter.is_alive():
@@ -184,13 +184,11 @@ class run_control(object):
                                 self.ch_com.send_done('EoR',self.partitionID, self.status)
                             elif self.command == 'SoS': # new spill. trigger counter will be reset by hardware signal. The software command triggers an empty header
                                 if len(self.cmd) > 1:
-                                    cycleID = np.uint32(self.cmd[1])
+                                    cycleID = np.uint64(self.cmd[1])
                                 else:
                                     cycleID = 0 #self.cycle_ID()
                                 converter.cycle_ID = cycleID
                                 logging.info('Recieved SoS header, cycleID = %s' % cycleID)
-        #                         if central_cycleID != self.cycle_ID():
-                                converter.cycle_ID = cycleID
                                 self.special_header['frameTime'] = 0xFF005C03
                                 self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                                 self.ch_com.send_done('SoS',self.partitionID, converter.total_events) # TODO: make sure send done is called after last event is converted
