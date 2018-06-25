@@ -4,7 +4,6 @@ import time
 import signal
 import logging
 import datetime
-import threading
 import multiprocessing
 from multiprocessing import Event, Process
 from optparse import OptionParser

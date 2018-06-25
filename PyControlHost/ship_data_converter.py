@@ -281,7 +281,6 @@ class DataConverter(multiprocessing.Process):
                             self.analyze_raw_data(raw_data=np.ascontiguousarray(data_array[selection]), module=module)
                             hits = self.interpreters[module].get_hits()
                             module_hits = np.empty(shape=(hits.shape[0],),dtype = self.multi_chip_event_dtype)
-#                             hits = np.append(hits, np.full(shape = (hits.shape[0],1),fill_value = module, dtype = [('moduleID',np.uint8)]))
                             module_hits['event_number'] = hits['event_number']
                             module_hits['trigger_number'] = hits['trigger_number']
                             module_hits['trigger_time_stamp'] = hits['trigger_time_stamp']
