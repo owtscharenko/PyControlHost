@@ -30,7 +30,7 @@ from SHiP_RunManager import SHiP_RunManager
 
 class run_control(object):
     
-    def __init__(self,dispatcher_addr,converter_addr, configuration, partitionID):    
+    def __init__(self,dispatcher_addr, converter_addr, ports, configuration, partitionID):    
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - [%(levelname)-8s] (%(threadName)-10s) %(message)s')   
 #         self._cancel_functions = None
 #         self.connect_cancel(["abort"])
@@ -40,8 +40,8 @@ class run_control(object):
         self.stop_run = Event()
         self.disp_addr = dispatcher_addr
         self.converter_socket_addr = converter_addr
+        self.ports = ports
         self.pybar_conf = configuration
-        
         self.commands = {'SoR','EoR','SoS','EoS','Enable','Disable','Stop'}
         self.partitionID = int(partitionID,16) # '0X0802' from 0800 to 0802 how to get this from scan instance?
         self.DetName = 'Pixels' + partitionID[5:] + '_LocDaq_' + partitionID[2:]
@@ -125,10 +125,10 @@ class run_control(object):
 #             signal.signal(signal.SIGINT, signal_handler)
 #             signal.signal(signal.SIGTERM, signal_handler)
         try:
-            converter = ship_data_converter.DataConverter(pybar_addr = self.converter_socket_addr, partitionID = self.partitionID)
+            converter = ship_data_converter.DataConverter(pybar_addr = self.converter_socket_addr, ports = self.ports, partitionID = self.partitionID)
             converter.name = 'DataConverter'
-            converter.daemon = True
-            RunManager(self.pybar_conf)
+#             converter.daemon = True
+            mngr = RunManager(self.pybar_conf)
 #             runmngr.daemon = True
             while True:
                 if self.status >=0 and self.ch_com.status >=0 :
@@ -193,6 +193,7 @@ class run_control(object):
                                 self.ch_com.send_done('SoS',self.partitionID, converter.total_events) # TODO: make sure send done is called after last event is converted
                             elif self.command == 'EoS': # trigger EoS header, sent after last event
                                 logging.info('recieved EoS, local cycleID:%s' % self.cycle_ID())
+                                converter.EoS_flag.set()
                                 self.special_header['frameTime'] = 0xFF005C04 # TODO: send EoS header after last event from spill
                                 self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                                 self.ch_com.send_done('EoS', self.partitionID, self.status)
@@ -236,9 +237,10 @@ if __name__ == '__main__':
         
     else:
         parser.error("incorrect number of arguments")
-    
+    ports = ['5001','5002','5003','5004','5005','5006','5007','5008']
     rec = run_control(dispatcher_addr,
                       converter_addr,
+                      ports,
                       configuration,
                       partitionID)
     
