@@ -1,7 +1,9 @@
 import logging
 from ctypes import Structure, c_ushort, c_int
 import numpy as np
+import Queue
 import control_host_coms as ch
+import multiprocessing
 
 
 
@@ -19,7 +21,33 @@ class Hit(Structure):
               ("hit_data", c_ushort)]
 
 
-class ch_communicator():
+class CHostReceiveHead(multiprocessing.Process):
+
+    def __init__(self,send_end):
+        multiprocessing.Process.__init__(self)
+        self.cmd = np.char.asarray(['0']*127, order={'C'})
+        self.cmdsize = np.ascontiguousarray(np.int8(self.cmd.nbytes))
+        self._stop_readout = multiprocessing.Event()
+        self.send_end = send_end
+    
+    def run(self):
+        while not self._stop_readout.wait(0.01):
+            self.status = -1
+            self.status = ch.get_head_wait('DAQCMD', self.cmdsize)
+            if self.status >=0:
+                self.status , cmd = ch.rec_cmd()
+                if self.status < 0:
+                    logging.warning('Command could not be recieved')
+                elif self.status >= 0 :
+                    logging.info('Recieved command: %s' % cmd)
+                self.send_end.send(cmd.split(' '))
+
+
+    def stop(self):
+        self._stop_readout.set()
+
+
+class CHostInterface():
     
     def __init__(self):
 #         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - [%(levelname)-8s] (%(threadName)-10s) %(message)s')
@@ -87,6 +115,9 @@ class ch_communicator():
                 logging.warning('Command is broken')
         return data
     
+    def get_head(self):
+        self.status = ch.get_head_wait('DAQCMD', self.cmdsize)
+        return self.status
     
 #     def send_data(self, tag, header, hits):
 # #         logging.info('sending data package with %s byte' % length)

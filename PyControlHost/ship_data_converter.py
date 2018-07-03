@@ -177,7 +177,7 @@ class DataConverter(multiprocessing.Process):
         self.setup_raw_data_analysis()
         
         self.kill_received = False
-        self.ch = ch_communicator()
+        self.ch = CHostInterface()
         self.total_events = 0
         self.start_date = datetime.datetime(2015, 04, 8, 00, 00)
         self.cycle_ID = multiprocessing.Value('i',0)
@@ -233,7 +233,7 @@ class DataConverter(multiprocessing.Process):
 #             self.interpreter.reset()
             self.n_readout = 0
             self.total_events = 0
-            logging.info('last cycleID=%s'% self.cycle_ID)
+            logging.info('last cycleID=%s'% self.cycle_ID.value)
             self.cycle_ID = cycleID
             self._stop_readout.clear()
             self.EoR_flag.clear()
