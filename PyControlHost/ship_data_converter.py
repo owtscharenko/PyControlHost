@@ -1,18 +1,23 @@
 from optparse import OptionParser
+import os
 import zmq
 import numpy as np
 import datetime
-from numba import njit
+from numba import njit, jit
+import numba
 import cProfile
+import cython
 import multiprocessing
-
+import time
 import logging
+from ctypes import c_ushort, c_int
 
 from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
 from pybar_fei4_interpreter.data_histograming import PyDataHistograming
 from pybar_fei4_interpreter.data_struct import HitInfoTable
-# import run_control.run_control as run_control
-from  ControlHost import ch_communicator, FrHeader, Hit
+# import run_control.RunControl as RunControl
+from  ControlHost import CHostInterface, FrHeader, Hit
+from control_host_coms import build_and_send_data
 
 
 
@@ -211,7 +216,7 @@ class DataConverter(multiprocessing.Process):
             interpreter.set_warning_output(False)
             interpreter.set_FEI4B(True)
             self.interpreters.append(interpreter)
-            self.hits.append(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype))
+            self.hits.append(np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C')))
 
 
 
@@ -278,7 +283,7 @@ class DataConverter(multiprocessing.Process):
         socket_pull.setsockopt(zmq.SUBSCRIBE, '')  # do not filter any data
         socket_pull.connect(socket_addr)
         logging.info("worker for module %s started, socket %s" % (moduleID,socket_addr))
-        while not self._stop_readout.wait(0.01) and not self.worker_finished_flags[moduleID].is_set():  # use wait(), do not block here
+        while not self._stop_readout.wait(0.01) and not self.worker_finished_flags[moduleID].wait(0.01):  # use wait(), do not block here
 #             with self.reset_lock:
             if self.EoS_flag.is_set():
                 send_end.send(self.hits[moduleID])
@@ -319,7 +324,7 @@ class DataConverter(multiprocessing.Process):
     def run(self):
         ''' create workers and collect data after EoS'''
         
-        multimodule_hits = np.empty(shape=(0,),dtype = self.multi_chip_event_dtype)
+        multimodule_hits = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype))
         self.jobs = []
         self.pipes = []
         
@@ -340,10 +345,19 @@ class DataConverter(multiprocessing.Process):
                         for pipe in self.pipes:
                             hit_array = pipe.recv()
                             multimodule_hits = np.hstack((multimodule_hits, hit_array))
-                        # build event from all modules, takes approx 6s for 32k events (1 hit per evt), 10s if SHiP data is written to disk
-                        for event_number in multimodule_hits['event_number']:
                             
-                            event = multimodule_hits[np.where(multimodule_hits['event_number'] == event_number)]
+                        multimodule_hits.sort(order='event_number')
+                        event_numbers , indices = np.unique(multimodule_hits['event_number'],return_index = True)
+                        print multimodule_hits['trigger_time_stamp'][0]
+                        print "time for sorting:", datetime.datetime.now() - start
+                        n_events = indices.shape[0]
+                        for i, index in enumerate(indices):
+                            if i == n_events-1:
+                                event = multimodule_hits[index:]
+                            else:
+                                event = multimodule_hits[index:indices[i+1]]
+#                             print index, indices[i+1]
+#                             print event 
                             channelID = np.bitwise_or(event['row']<<7,event['column'],order='C',dtype='uint16')
                             hit_data = np.bitwise_or(np.bitwise_or(event['tot']<<4,event['moduleID'])<<8,
                                                      np.bitwise_or(0<<4,event['relative_BCID']),order='C',dtype='uint16')
@@ -353,19 +367,18 @@ class DataConverter(multiprocessing.Process):
                             # each event needs a frame header
                             self.data_header = np.empty(shape=(1,), dtype= FrHeader)
                             self.data_header['size'] = channelID.nbytes + 16
-                            self.data_header['partID'] = 0x0802 # self.partitionID
+                            self.data_header['partID'] = self.partitionID
                             self.data_header['cycleID'] = self.cycle_ID.value
-                            self.data_header['frameTime'] = event['trigger_time_stamp'][0]
+                            self.data_header['frameTime'] = event[0]['trigger_time_stamp']
                             self.data_header['timeExtent'] = 15
                             self.data_header['flags'] = 0
-                
                             self.ch.send_data(self.RAW_data_tag, self.data_header, self.ch_hit_data)
-                            # save converted hits + header for each spill in separate file takes approx 5s for 32k events (1 hit per evt)
-    #                         with open("./RUN_%s/%s.txt" % (self.run_number.value, self.file_date),'a+') as spill_file: 
-    #                             np.savetxt(spill_file, self.data_header)
-    #                             np.savetxt(spill_file, self.ch_hit_data)
+                            
+#                             with open("./RUN_%s/%s.txt" % (self.run_number.value, self.file_date),'a+') as spill_file:
+#                                 np.savetxt(spill_file, self.data_header) #self.data_header)
+#                                 np.savetxt(spill_file, self.ch_hit_data)# self.ch_hit_data)
                         self.SoS_data_flag.set()
-                        print "time needed for %s events : %s" %(multimodule_hits['event_number'].shape,(datetime.datetime.now()-start))       
+                        print "time needed for %s events : %s" %(multimodule_hits['event_number'][-1],(datetime.datetime.now()-start))
 #                     self.total_events += event_indices.shape[0]
                 
                         
