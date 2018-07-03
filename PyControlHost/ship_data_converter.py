@@ -139,13 +139,14 @@ def decode_second_dataword(dataword):
     
     return tot, moduleID, flag, rel_BCID
 
-            
+
+        
 class DataConverter(multiprocessing.Process):
 
     def __init__(self, pybar_addr, ports, partitionID, disp_addr=None):
         
         multiprocessing.Process.__init__(self)
-#         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - [%(levelname)-8s] (%(threadName)-10s) %(message)s')   
+        self.logger = logging.getLogger(__name__)
 #         self.connect(socket_addr)
         self.n_readout = 0
         self.n_modules = 8
@@ -226,24 +227,24 @@ class DataConverter(multiprocessing.Process):
         self.socket_pull = self.context.socket(zmq.SUB)  # subscriber
         self.socket_pull.setsockopt(zmq.SUBSCRIBE, '')  # do not filter any data
         self.socket_pull.connect(self.socket_addr)
-        logging.info('DataConverter connected to %s' % self.socket_addr)
+        self.logger.info('DataConverter connected to %s' % self.socket_addr)
 
 
     def reset(self,cycleID=0, msg=None):
         if msg:
-            logging.info(msg)
+            self.logger.info(msg)
         with self.reset_lock:
             for interpreter in self.interpreters:
                 interpreter.reset()
 #             self.interpreter.reset()
             self.n_readout = 0
             self.total_events = 0
-            logging.info('last cycleID=%s'% self.cycle_ID.value)
+            self.logger.info('last cycleID=%s'% self.cycle_ID.value)
             self.cycle_ID = cycleID
             self._stop_readout.clear()
             self.EoR_flag.clear()
             self.EoS_flag.clear()
-            logging.info('DataConverter has been reset')
+            self.logger.info('DataConverter has been reset')
 
     
     def SoS_reset(self): # TODO: implement SoS and EoS reset.
@@ -277,18 +278,17 @@ class DataConverter(multiprocessing.Process):
         '''one worker for each FE chip, since RAW data comes from FIFO separated by moduleID
            It is necessary to instantiate zmq.Context() in run method. Otherwise run has no acces when called as multiprocessing.process.
         '''
-        logging.info("socket addr: %s" % socket_addr)
         context = zmq.Context()
         socket_pull = context.socket(zmq.SUB)  # subscriber
         socket_pull.setsockopt(zmq.SUBSCRIBE, '')  # do not filter any data
         socket_pull.connect(socket_addr)
-        logging.info("worker for module %s started, socket %s" % (moduleID,socket_addr))
+        self.logger.info("worker for module %s started, socket %s" % (moduleID,socket_addr))
         while not self._stop_readout.wait(0.01) and not self.worker_finished_flags[moduleID].wait(0.01):  # use wait(), do not block here
 #             with self.reset_lock:
             if self.EoS_flag.is_set():
                 send_end.send(self.hits[moduleID])
                 self.worker_finished_flags[moduleID].set()
-                logging.info("module_%s worker finished received %s hits" % (moduleID, self.hits[moduleID].shape))
+                self.logger.info("module_%s worker finished received %s hits" % (moduleID, self.hits[moduleID].shape))
             try:
                 meta_data = socket_pull.recv_json(flags=zmq.NOBLOCK)
             except zmq.Again:
@@ -317,7 +317,7 @@ class DataConverter(multiprocessing.Process):
                     module_hits['moduleID'] = moduleID
                     
                     self.hits[moduleID] = np.r_[self.hits[moduleID],module_hits]
-#                     logging.info("module_%s recieved %s hits" %(moduleID,self.hits[moduleID].shape))
+#                     self.logger.info("module_%s recieved %s hits" %(moduleID,self.hits[moduleID].shape))
                     
 
 
@@ -335,6 +335,7 @@ class DataConverter(multiprocessing.Process):
             self.jobs.append(worker)
             self.pipes.append(recv_end)
             worker.start()
+#             print "PID of worker %s:"% module, worker.pid
             
         while not self._stop_readout.wait(0.1):
             if self.EoS_flag.is_set():
@@ -386,7 +387,7 @@ class DataConverter(multiprocessing.Process):
         self._stop_readout.set()
         for job in self.jobs:
             job.join()
-        logging.info('Stopping converter')
+        self.logger.info('Stopping converter')
 
 
 if __name__ == '__main__':

@@ -4,8 +4,7 @@ import time
 import signal
 import logging
 import datetime
-from threading import Event, current_thread, Thread
-import Queue
+from threading import current_thread, _MainThread
 from optparse import OptionParser
 from inspect import getmembers, isclass, getargspec
 import multiprocessing
@@ -18,7 +17,11 @@ import ship_data_converter
 from  ControlHost import CHostInterface, FrHeader, CHostReceiveHead
 from bdaq53_send_data import transfer_file
 
-logger = logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - [%(levelname)-8s] (%(threadName)-10s) %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - [%(levelname)-8s] (%(threadName)-10s) %(message)s')
+logger = logging.getLogger('RunControl')
+# formatter = logging.Formatter('%(asctime)s - %(name)s - [%(levelname)-8s] (%(threadName)-10s) %(message)s')
+# logger.setFormatter(formatter)
+
 
 class RunControl(object):
     
@@ -26,8 +29,6 @@ class RunControl(object):
            
         self.status = 0
         self.enabled = True
-        self.abort_run = Event()
-        self.stop_run = Event()
         self.disp_addr = dispatcher_addr
         self.converter_socket_addr = converter_addr
         self.ports = ports
@@ -35,7 +36,7 @@ class RunControl(object):
         self.commands = {'SoR','EoR','SoS','EoS','Enable','Disable','Stop'}
         self.partitionID = int(partitionID,16) # '0X0802' from 0800 to 0802 how to get this from scan instance?
         self.DetName = 'Pixels' + partitionID[5:] + '_LocDaq_' + partitionID[2:]
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - [%(levelname)-8s] (%(threadName)-10s) %(message)s')
+#         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - [%(levelname)-8s] (%(threadName)-10s) %(message)s')
         
         self.ch_com = CHostInterface()
         self.connect_CH(self.disp_addr,self.DetName)
@@ -63,11 +64,11 @@ class RunControl(object):
         ''' connect to dispatcher, DetName needed for identification. only needed at initial connection'''
         self.ch_com.init_link(disp_addr, subscriber=None)
         if self.ch_com.status < 0:
-            logging.error('Could not connect to host %s' % disp_addr)
+            logger.error('Could not connect to host %s' % disp_addr)
         elif self.ch_com.status >= 0 :
             self.ch_com.subscribe(DetName)
         if self.ch_com.status < 0:
-            logging.error('Could not subscribe with name=%s to host %s' % (DetName, disp_addr))
+            logger.error('Could not subscribe with name=%s to host %s' % (DetName, disp_addr))
         elif self.ch_com.status >= 0 :
             self.ch_com.send_me_always()
         
@@ -78,8 +79,8 @@ class RunControl(object):
         starts threads corresponding to the command recieved.
         '''
         
-        if current_thread().name == 'MainThread':
-            logging.info('Press Ctrl-C to stop run')
+        if isinstance(current_thread(), _MainThread):
+            logger.info('Press Ctrl-C twice to terminate RunControl')
             signal_handler = self._signal_handler
             signal.signal(signal.SIGINT, signal_handler)
 #             signal.signal(signal.SIGTERM, signal_handler)
@@ -101,7 +102,7 @@ class RunControl(object):
 #                     if self.status >=0 and self.ch_com.status >=0 :
 #                         self.cmd = self.ch_com.get_cmd() # recieved command contains command word [0] and additional info [1]... different for each case
             if not CH_head_reciever.is_alive():
-                head = CH_head_reciever.start()
+                CH_head_reciever.start()
             if recv_end.poll():
                 self.cmd = recv_end.recv()
                 if len(self.cmd) > 1:
@@ -124,10 +125,11 @@ class RunControl(object):
                         if not converter.is_alive():
                             converter.start()
                         else: converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
-                        converter.run_number = run_number
+                        converter.run_number.Value = run_number
                         #send special SoR header
                         self.special_header['frameTime'] = 0xFF005C01
                         self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
+                        logger.info('Sent SoR header')
                         #start pybar trigger scan
                         self.join_scan_thread = self.mngr.run_run(ThresholdScan, use_thread=True, catch_exception=True)
                         self.scan_status = self.join_scan_thread(0.1)
@@ -139,18 +141,18 @@ class RunControl(object):
 #                                                self.converter_socket_addr[:-4] + ports[0])
                         self.ch_com.send_done('SoR',self.partitionID, self.status)
                     elif self.command == 'EoR': # stop existing pyBAR ExtTriggerScanShiP
-                        logging.info('Recieved EoR command')
+                        logger.info('Recieved EoR command')
                         if self.mngr.current_run.__class__.__name__ == 'ThresholdScan':
 #                                     pass
                             self.join_scan_thread(timeout = 0.01)
                             self.mngr.current_run.stop(msg='ExtTriggerScanSHiP') # TODO: check how to properly stop pyBAR RunManager
                             self.scan_status = self.join_scan_thread()
                         else:
-                            logging.error('Recieved EoR command, but no ExtTriggerScanSHiP running')
+                            logger.error('Recieved EoR command, but no ExtTriggerScanSHiP running')
                         if converter.is_alive():
                             converter.reset(cycleID = self.cycle_ID(), msg='EoR command, resetting DataConverter') # reset interpreter and event counter
                         else:
-                            logging.error('Recieved EoR command to reset converter, but no converter running')
+                            logger.error('Recieved EoR command to reset converter, but no converter running')
                         
                         # send special EoR header
                         self.special_header['frameTime'] = 0xFF005C02
@@ -163,24 +165,24 @@ class RunControl(object):
                             cycleID = np.uint64(self.cmd[1])
                         else:
                             cycleID = 0 #self.cycle_ID()
-                        converter.cycle_ID = cycleID
-                        logging.info('Recieved SoS header, cycleID = %s' % cycleID)
+                        converter.cycle_ID.Value = cycleID
+                        logger.info('Recieved SoS header, cycleID = %s' % cycleID)
                         self.special_header['frameTime'] = 0xFF005C03
                         self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                         self.ch_com.send_done('SoS',self.partitionID, converter.total_events) # TODO: make sure send done is called after last event is converted
                     elif self.command == 'EoS': # trigger EoS header, sent after last event
-                        logging.info('recieved EoS, local cycleID:%s' % self.cycle_ID())
+                        logger.info('recieved EoS, local cycleID:%s' % self.cycle_ID())
                         converter.EoS_flag.set()
                         self.special_header['frameTime'] = 0xFF005C04 # TODO: send EoS header after last event from spill
                         self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                         self.ch_com.send_done('EoS', self.partitionID, self.status)
                     elif self.command == 'Stop':
-                        logging.info('Recieved Stop! Leaving loop, aborting all functions')
+                        logger.info('Recieved Stop! Leaving loop, aborting all functions')
                         break
                 else:
-                    logging.error('Command=%s could not be identified' % self.cmd)
+                    logger.error('Command=%s could not be identified' % self.cmd)
             elif self.status < 0 :
-                logging.error('Header could not be recieved')
+                logger.error('Header could not be recieved')
             else:
                 continue
 #                         self.join_scan_thread(0.01)
@@ -191,9 +193,9 @@ class RunControl(object):
         converter.stop()
         self.join_scan_thread(timeout = 0.01)
         self.mngr.abort()
-        logging.error('Loop exited')
+        logger.error('Loop exited')
 #         except Exception as e:
-#             logging.error('Exception, terminating')
+#             logger.error('Exception, terminating')
 #             print e.__class__.__name__ + ": " + str(e)
             
 
@@ -226,9 +228,6 @@ if __name__ == '__main__':
     
     rec.receive()
 
-    
-#     rec = threading.Thread(name = 'reciever', target = RunControl('127.0.0.1', '/home/niko/git/pyBAR/pybar/configuration.yaml'))
-#     rec.start()
     
     
         
