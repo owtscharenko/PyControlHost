@@ -15,11 +15,16 @@ typedef struct DataFrameHeader{
     uint16_t flags;
 	}DataFrameHeader;
 
-typedef struct Hit{
+typedef struct {
 	uint16_t channelId;
 	uint16_t hit_Data;
-	}Hit;
+	}RawDataHit;
 
+
+typedef struct {
+	DataFrameHeader header;
+	RawDataHit hits[];
+	} DataFrame;
 
 //unsigned int shift_left(unsigned int number,unsigned int positions)
 //	{
@@ -42,7 +47,7 @@ typedef struct Hit{
 //	return res;
 //	}
 
-unsigned short *build_EvtFrame(DataFrameHeader*& header, Hit*& hits, const unsigned int& head_bytes, const unsigned int& hits_bytes)
+unsigned short *build_EvtFrame(DataFrameHeader*& header, RawDataHit*& hits, const unsigned int& head_bytes, const unsigned int& hits_bytes)
 	{
 //  head_lenght and hits_length are size in byte of the respective array
 //  join header and hits array by memcopy, then send as one memory block
