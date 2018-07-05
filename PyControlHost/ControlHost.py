@@ -20,24 +20,25 @@ class Hit(Structure):
               ("hit_data", c_ushort)]
 
 
-class CHostReceiveHead(multiprocessing.Process):
+class CHostReceiveHeader(multiprocessing.Process):
 
     def __init__(self,send_end):
         multiprocessing.Process.__init__(self)
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger('CHostReceiveHeader')
         self.cmd = np.char.asarray(['0']*127, order={'C'})
         self.cmdsize = np.ascontiguousarray(np.int8(self.cmd.nbytes))
         self._stop_readout = multiprocessing.Event()
+        self.status = multiprocessing.Value('i',0)
         self.send_end = send_end
     
     def run(self):
         while not self._stop_readout.wait(0.01):
-            self.status = ch.get_head_wait('DAQCMD', self.cmdsize)
-            if self.status >=0:
-                self.status , cmd = ch.rec_cmd()
+            self.status.value = ch.get_head_wait('DAQCMD', self.cmdsize)
+            if self.status.value >=0:
+                self.status.value , cmd = ch.rec_cmd()
                 if self.status < 0:
                     self.logger.warning('Command could not be recieved')
-                elif self.status >= 0 :
+                elif self.status.value >= 0 :
                     self.logger.info('Recieved command: %s' % cmd)
                 self.send_end.send(cmd.split(' '))
 
@@ -70,7 +71,7 @@ class CHostInterface():
     def subscribe(self,DetName):
         self.status = ch.subscribe(DetName)
         if self.status >= 0: 
-            self.logger.info('Subscribed to Host with name=%s'%DetName)
+            self.logger.info('Subscribed to Host with name = %s'%DetName)
         elif self.status < 0:
             self.logger.error('Could not subscribe to host')
         
@@ -104,7 +105,7 @@ class CHostInterface():
     
     
     def get_data(self,tag):
-        self.status = ch.check_head(tag,self.cmdsize)
+        self.status = ch.get_head(tag,self.cmdsize)
         if self.status < 0:
             self.logger.warning('Message head is broken')
         elif self.status >= 0:

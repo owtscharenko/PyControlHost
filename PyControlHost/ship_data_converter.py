@@ -140,13 +140,117 @@ def decode_second_dataword(dataword):
     return tot, moduleID, flag, rel_BCID
 
 
+@cython.boundscheck(False)
+@cython.wraparound(False)
+def build_data(cycleID, partitionID, event_numbers, multimodule_hits, hit_data_dtype):
+    headers, data = [],[]
+    for event_number in event_numbers:
+        event = np.array(multimodule_hits[np.where(multimodule_hits['event_number'] == event_number)],dtype = multimodule_hits.dtype)
+        channelID = np.bitwise_or(event['row']<<7,event['column'],order='C',dtype=np.uint16)
+        hit_data = np.bitwise_or(np.bitwise_or(event['tot']<<4,event['moduleID'])<<8,
+                                 np.bitwise_or(0<<4,event['relative_BCID']),order='C',dtype=np.uint16)
+        ch_hit_data = np.empty(shape = channelID.shape[0], dtype = hit_data_dtype) # TODO: can not create array in njit
+        ch_hit_data["channelID"] = channelID
+        ch_hit_data["hit_data"] = hit_data 
+        # each event needs a frame header
+        data_header = np.empty(shape=(1,), dtype= [("size", np.uint16),
+                                                  ("partID", np.uint16),
+                                                  ("cycleID",np.int32),
+                                                  ("frameTime", np.int32),
+                                                  ("timeExtent", np.uint16),
+                                                  ("flags",  np.uint16)])
+        data_header['size'] = channelID.nbytes + 16
+        data_header['partID'] = partitionID
+        data_header['cycleID'] = cycleID
+        data_header['frameTime'] = event['trigger_time_stamp'][0]
+        data_header['timeExtent'] = 15
+        data_header['flags'] = 0
+        headers.append(data_header)
+        data.append(ch_hit_data)
+    return headers, data
+
+@njit
+def _new_event(event_number_1, event_number_2):
+    'Detect a new event by checking if the event number of the actual hit is the actual event number'
+    return event_number_1 != event_number_2
+
+@njit
+def sort_mutlimodule_hits(multimodule_hits):
+    'sort array'
+    return multimodule_hits.sort()
+
+@njit
+def build_from_sorted(multimodule_hits):
+    'build events from sorted array'
+    total_hits = multimodule_hits.shape[0]
+    event_number = multimodule_hits[0]['event_number']
+    start_event_hit_index = 0
+    
+    for i in range(total_hits):
+        if _new_event(multimodule_hits[i]['event_number'], event_number):
+            pass
+            
+
+@njit
+def build_data_while(cycleID, partitionID,hit_arrays, event_numbers):
+    a,b,c,d,e,f,g,h = 0
+    hit_list = []
+    flag = np.zeros((8,1))
+    it = np.nditer(event_numbers,flags=['external_loop'])
+    for _ in hit_arrays:
+        module_hits = []
+        hit_list.append(module_hits)
+    while not it.finished:
+        if hit_arrays[0]['event_number'][a] == event_number:
+            hit_list[0].append(hit_arrays[0][a])
+            a +=1
+        else:
+            flag[0] = True
+        if hit_arrays[1]['event_number'][b] == event_number:
+            hit_list[1].append(hit_arrays[1][b])
+            b +=1
+        else:
+            flag[1] = True
+        if hit_arrays[2]['event_number'][c] == event_number:
+            hit_list[2].append(hit_arrays[2][c])
+            c +=1
+        else:
+            flag[2] = True
+        if hit_arrays[3]['event_number'][d] == event_number:
+            hit_list[3].append(hit_arrays[3][d])
+            d +=1
+        else:
+            flag[3] = True
+        if hit_arrays[4]['event_number'][e] == event_number:
+            hit_list[4].append(hit_arrays[4][e])
+            e +=1
+        else:
+            flag[4] = True
+        if hit_arrays[5]['event_number'][f] == event_number:
+            hit_list[5].append(hit_arrays[5][f])
+            f +=1
+        else:
+            flag[5] = True
+        if hit_arrays[6]['event_number'][g] == event_number:
+            hit_list[6].append(hit_arrays[6][g])
+            g +=1
+        else:
+            flag[6] = True
+        if hit_arrays[7]['event_number'][h] == event_number:
+            hit_list[7].append(hit_arrays[7][h])
+            h +=1
+        else:
+            flag[7] = True
+        if flag.all:
+            it.iternext()
+        
         
 class DataConverter(multiprocessing.Process):
 
     def __init__(self, pybar_addr, ports, partitionID, disp_addr=None):
         
         multiprocessing.Process.__init__(self)
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger('DataConverter')
 #         self.connect(socket_addr)
         self.n_readout = 0
         self.n_modules = 8
@@ -172,7 +276,9 @@ class DataConverter(multiprocessing.Process):
                                     ]
         
         self._stop_readout = multiprocessing.Event()  # exit signal
+        self.SoR_flag = multiprocessing.Event()
         self.EoR_flag = multiprocessing.Event()
+        self.SoS_flag = multiprocessing.Event()
         self.EoS_flag = multiprocessing.Event()
         self.SoS_data_flag = multiprocessing.Event()
         self.worker_finished_flags= [multiprocessing.Event() for _ in range(self.n_modules)]
@@ -201,7 +307,7 @@ class DataConverter(multiprocessing.Process):
         
         
 
-    def cycle_ID(self):
+    def get_cycle_ID(self):
         ''' counts in 0.2s steps from 08. April 2015 '''
         return np.uint32((datetime.datetime.now() - self.start_date).total_seconds() * 5)
 
@@ -239,11 +345,16 @@ class DataConverter(multiprocessing.Process):
 #             self.interpreter.reset()
             self.n_readout = 0
             self.total_events = 0
+            print self.cycle_ID
+            print type(self.cycle_ID)
             self.logger.info('last cycleID=%s'% self.cycle_ID.value)
-            self.cycle_ID = cycleID
+            self.cycle_ID.value = cycleID # TODO: careful with multiprocessing values!
             self._stop_readout.clear()
+            self.SoR_flag.clear()
             self.EoR_flag.clear()
+            self.SoS_flag.clear()
             self.EoS_flag.clear()
+            self.SoS_data_flag.clear()
             self.logger.info('DataConverter has been reset')
 
     
@@ -346,40 +457,39 @@ class DataConverter(multiprocessing.Process):
                         for pipe in self.pipes:
                             hit_array = pipe.recv()
                             multimodule_hits = np.hstack((multimodule_hits, hit_array))
-                            
+                        self.SoS_flag.clear()    
                         multimodule_hits.sort(order='event_number')
                         event_numbers , indices = np.unique(multimodule_hits['event_number'],return_index = True)
-                        print multimodule_hits['trigger_time_stamp'][0]
-                        print "time for sorting:", datetime.datetime.now() - start
+#                         print multimodule_hits['trigger_time_stamp'][0]
+#                         print "time for sorting:", datetime.datetime.now() - start
                         n_events = indices.shape[0]
-                        for i, index in enumerate(indices):
-                            if i == n_events-1:
-                                event = multimodule_hits[index:]
-                            else:
-                                event = multimodule_hits[index:indices[i+1]]
-#                             print index, indices[i+1]
-#                             print event 
-                            channelID = np.bitwise_or(event['row']<<7,event['column'],order='C',dtype='uint16')
-                            hit_data = np.bitwise_or(np.bitwise_or(event['tot']<<4,event['moduleID'])<<8,
-                                                     np.bitwise_or(0<<4,event['relative_BCID']),order='C',dtype='uint16')
-                            self.ch_hit_data = np.empty(channelID.shape[0], dtype = Hit)
-                            self.ch_hit_data["channelID"] = channelID
-                            self.ch_hit_data["hit_data"] = hit_data
-                            # each event needs a frame header
-                            self.data_header = np.empty(shape=(1,), dtype= FrHeader)
-                            self.data_header['size'] = channelID.nbytes + 16
-                            self.data_header['partID'] = self.partitionID
-                            self.data_header['cycleID'] = self.cycle_ID.value
-                            self.data_header['frameTime'] = event[0]['trigger_time_stamp']
-                            self.data_header['timeExtent'] = 15
-                            self.data_header['flags'] = 0
-                            self.ch.send_data(self.RAW_data_tag, self.data_header, self.ch_hit_data)
-                            
-#                             with open("./RUN_%s/%s.txt" % (self.run_number.value, self.file_date),'a+') as spill_file:
-#                                 np.savetxt(spill_file, self.data_header) #self.data_header)
-#                                 np.savetxt(spill_file, self.ch_hit_data)# self.ch_hit_data)
+                        with open("./RUN_%s/%s.txt" % (self.run_number.value, self.file_date),'a+') as spill_file:
+                            for i, index in enumerate(indices):
+                                if i == n_events-1:
+                                    event = multimodule_hits[index:]
+                                else:
+                                    event = multimodule_hits[index:indices[i+1]]
+    #                             print index, indices[i+1]
+    #                             print event 
+                                channelID = np.bitwise_or(event['row']<<7,event['column'],order='C',dtype='uint16')
+                                hit_data = np.bitwise_or(np.bitwise_or(event['tot']<<4,event['moduleID'])<<8,
+                                                         np.bitwise_or(0<<4,event['relative_BCID']),order='C',dtype='uint16')
+                                self.ch_hit_data = np.empty(channelID.shape[0], dtype = Hit)
+                                self.ch_hit_data["channelID"] = channelID
+                                self.ch_hit_data["hit_data"] = hit_data
+                                # each event needs a frame header
+                                self.data_header = np.empty(shape=(1,), dtype= FrHeader)
+                                self.data_header['size'] = channelID.nbytes + 16
+                                self.data_header['partID'] = self.partitionID
+                                self.data_header['cycleID'] = self.cycle_ID.value
+                                self.data_header['frameTime'] = event[0]['trigger_time_stamp']
+                                self.data_header['timeExtent'] = 15
+                                self.data_header['flags'] = 0
+                                self.ch.send_data(self.RAW_data_tag, self.data_header, self.ch_hit_data)
+                                np.savetxt(spill_file, self.data_header) #self.data_header)
+                                np.savetxt(spill_file, self.ch_hit_data)# self.ch_hit_data)
                         self.SoS_data_flag.set()
-                        print "time needed for %s events : %s" %(multimodule_hits['event_number'][-1],(datetime.datetime.now()-start))
+#                         print "time needed for %s events : %s" %(multimodule_hits['event_number'][-1],(datetime.datetime.now()-start))
 #                     self.total_events += event_indices.shape[0]
                 
                         
