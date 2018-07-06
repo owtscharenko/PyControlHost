@@ -34,7 +34,7 @@ typedef struct {
 
 typedef struct {
 	DataFrameHeader header;
-	RawDataHit hits[];
+	Hit hits[];
 	} DataFrame;
 
 //unsigned int shift_left(unsigned int number,unsigned int positions)
