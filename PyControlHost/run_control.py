@@ -138,13 +138,14 @@ class RunControl(object):
                             self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                             self.ch_com.send_done('EoR',self.partitionID, self.status)
                         self.EoR_rec = False
-                    elif self.command == 'SoS' and not self.converter.SoS_flag.wait(0.001) and self.SoS_rec:
+                    elif self.command == 'SoS' and not self.converter.SoS_flag.wait(0.01) and self.SoS_rec:
                         self.ch_com.send_done('SoS',self.partitionID, self.converter.total_events) # TODO: make sure send done is called after last trigger is read out
                         self.SoS_rec = False
-                    elif self.command == 'EoS' and self.converter.SoS_data_flag.wait(0.001) and self.EoS_rec:
+                    elif self.command == 'EoS' and self.converter.SoS_data_flag.wait(0.01) and self.EoS_rec:
                         self.special_header['frameTime'] = 0xFF005C04 # TODO: send EoS header after last event from spill
                         self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                         self.ch_com.send_done('EoS', self.partitionID, self.status)
+                        self.converter.EoS_reset() # TODO: bad practice, reset should not be here but in react method
                         self.EoS_rec = False
                 elif CH_head_reciever.status.value < 0 :
                     logger.error('Header could not be recieved')

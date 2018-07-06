@@ -5,8 +5,19 @@
 //#include <ctime>
 //#include <cmath>
 
+typedef struct HitInfoTable{
+	int64_t event_number;
+	uint32_t trigger_number;
+	uint32_t trigger_time_stamp;
+	uint8_t relative_BCID;
+	uint8_t moduleID;
+	uint8_t column;
+	uint16_t row;
+	uint8_t tot;
+	}HitInfoTable;
 
-typedef struct DataFrameHeader{
+
+typedef struct {
     uint16_t size;
     uint16_t partitionID;
     uint32_t cycleID;

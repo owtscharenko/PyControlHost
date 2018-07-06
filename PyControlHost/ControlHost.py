@@ -31,7 +31,7 @@ class CHostReceiveHeader(multiprocessing.Process):
         self.status = multiprocessing.Value('i',0)
         self.send_end = send_end
     
-    def run(self):
+    def run(self): # TODO: is not killed by ctrl+c in main loop
         while not self._stop_readout.wait(0.01):
             self.status.value = ch.get_head_wait('DAQCMD', self.cmdsize)
             if self.status.value >=0:
@@ -121,7 +121,7 @@ class CHostInterface():
     
 #     def send_data(self, tag, header, hits):
 # #         self.logger.info('sending data package with %s byte' % length)
-#         self.status = ch.send_fulldata_numpy(tag, header, hits) # TODO: case only header, no hits. 
+#         self.status = ch.send_fulldata_numpy(tag, header, hits)
 #         if self.status < 0:
 #             self.logger.error('Sending package failed')
             
@@ -138,7 +138,7 @@ class CHostInterface():
         if self.status < 0:
             self.logger.error('Error during acknowledge')
         elif self.status >=0:
-            self.logger.info('Acknowledged command=%s with tag=%s' % (msg,tag))
+            self.logger.info('Acknowledged command = %s with tag = %s' % (msg,tag))
             
             
     def send_done(self,cmd, partitionID, status):
@@ -146,7 +146,7 @@ class CHostInterface():
         if self.status < 0:
             self.logger.error('Could not send DAQDONE')
         elif self.status >= 0:
-            self.logger.info('DAQDONE msg sent')
+            self.logger.info('DAQDONE sent, msg = %s'% cmd )
 
     
 if __name__ == '__main__':

@@ -281,8 +281,10 @@ class DataConverter(multiprocessing.Process):
         self.SoS_flag = multiprocessing.Event()
         self.EoS_flag = multiprocessing.Event()
         self.SoS_data_flag = multiprocessing.Event()
+        self.worker_reset_flag = multiprocessing.Event()
+        self.reset_multimodule_hits = multiprocessing.Event()
         self.worker_finished_flags= [multiprocessing.Event() for _ in range(self.n_modules)]
-        self.reset_lock = multiprocessing.Lock() # exit signal
+        self.reset_lock = multiprocessing.Lock() 
         
         self.raw_data_queue = multiprocessing.Queue()
         
@@ -305,7 +307,6 @@ class DataConverter(multiprocessing.Process):
         if disp_addr:
             self.ch.connect_CH(disp_addr,self.DetName)
         
-        
 
     def get_cycle_ID(self):
         ''' counts in 0.2s steps from 08. April 2015 '''
@@ -315,6 +316,7 @@ class DataConverter(multiprocessing.Process):
     def setup_raw_data_analysis(self):
         self.interpreters = []
         self.hits = []
+        self.multimodule_hits = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype))
         for _ in range(self.n_modules):
             interpreter = PyDataInterpreter()
             interpreter.create_empty_event_hits(True)
@@ -324,7 +326,6 @@ class DataConverter(multiprocessing.Process):
             interpreter.set_FEI4B(True)
             self.interpreters.append(interpreter)
             self.hits.append(np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C')))
-
 
 
     def connect(self, socket_addr):
@@ -385,7 +386,7 @@ class DataConverter(multiprocessing.Process):
         return event_frame
     
     
-    def module_worker(self,socket_addr, moduleID, send_end):
+    def _module_worker(self,socket_addr, moduleID, send_end):
         '''one worker for each FE chip, since RAW data comes from FIFO separated by moduleID
            It is necessary to instantiate zmq.Context() in run method. Otherwise run has no acces when called as multiprocessing.process.
         '''
@@ -429,46 +430,59 @@ class DataConverter(multiprocessing.Process):
                     
                     self.hits[moduleID] = np.r_[self.hits[moduleID],module_hits]
 #                     self.logger.info("module_%s recieved %s hits" %(moduleID,self.hits[moduleID].shape))
-                    
+
 
 
     def run(self):
-        ''' create workers and collect data after EoS'''
+        ''' create workers upon start and collect data after EoS'''
         
-        multimodule_hits = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype))
+#         self.multimodule_hits = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype))
         self.jobs = []
         self.pipes = []
         
+#         for module in range(self.n_modules): # TODO: fast enough? only possible to check with 8 FEs
+#             recv_end, send_end = multiprocessing.Pipe(False)
+#             worker = multiprocessing.Process(target = self.module_worker, args =(self.address + self.ports[module], module, send_end))
+#             worker.name = 'RecieverModule_%s' % module
+#             self.jobs.append(worker)
+#             self.pipes.append(recv_end)
+#             worker.start()
+#             print "PID of worker %s:"% module, worker.pid
+            
         for module in range(self.n_modules): # TODO: fast enough? only possible to check with 8 FEs
             recv_end, send_end = multiprocessing.Pipe(False)
-            worker = multiprocessing.Process(target = self.module_worker, args =(self.address + self.ports[module], module, send_end))
+            worker = threading.Thread(target = self._module_worker, args =(self.address + self.ports[module], module, send_end))
             worker.name = 'RecieverModule_%s' % module
             self.jobs.append(worker)
             self.pipes.append(recv_end)
             worker.start()
-#             print "PID of worker %s:"% module, worker.pid
-            
+        
         while not self._stop_readout.wait(0.1):
-            if self.EoS_flag.is_set():
+            if self.reset_multimodule_hits.is_set(): # set by SoS_reset upon reception of SoS signal
+                self.multimodule_hits = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype))
+                self.reset_multimodule_hits.clear()
+#                 self.logger.info('Main array has been reset')
+            if self.EoS_flag.is_set(): # EoS_flag is set in run_control after reception of EoS command 
                 #TODO: check building of common event from all modules
                 with self.reset_lock:
                     start = datetime.datetime.now()
-                    if not self.SoS_data_flag.is_set():
+                    if not self.SoS_data_flag.is_set(): # SoS_data_flag is set after all events are sent to dispatcher
                         for pipe in self.pipes:
                             hit_array = pipe.recv()
-                            multimodule_hits = np.hstack((multimodule_hits, hit_array))
+                            self.multimodule_hits = np.hstack((self.multimodule_hits, hit_array))
+                        
                         self.SoS_flag.clear()    
-                        multimodule_hits.sort(order='event_number')
-                        event_numbers , indices = np.unique(multimodule_hits['event_number'],return_index = True)
-#                         print multimodule_hits['trigger_time_stamp'][0]
-#                         print "time for sorting:", datetime.datetime.now() - start
+                        self.multimodule_hits.sort(order='event_number')
+                        event_numbers , indices = np.unique(self.multimodule_hits['event_number'],return_index = True)
+                        print "time for sorting:", datetime.datetime.now() - start
                         n_events = indices.shape[0]
-                        with open("./RUN_%s/%s.txt" % (self.run_number.value, self.file_date),'a+') as spill_file:
+                        print "nevents multiarray" , n_events , "shape multiarray" , self.multimodule_hits.shape
+                        with open("./RUN_%s/%s.txt" % (self.run_number.value, self.file_date.value),'a+') as spill_file:
                             for i, index in enumerate(indices):
                                 if i == n_events-1:
-                                    event = multimodule_hits[index:]
+                                    event = self.multimodule_hits[index:]
                                 else:
-                                    event = multimodule_hits[index:indices[i+1]]
+                                    event = self.multimodule_hits[index:indices[i+1]]
     #                             print index, indices[i+1]
     #                             print event 
                                 channelID = np.bitwise_or(event['row']<<7,event['column'],order='C',dtype='uint16')
@@ -486,18 +500,19 @@ class DataConverter(multiprocessing.Process):
                                 self.data_header['timeExtent'] = 15
                                 self.data_header['flags'] = 0
                                 self.ch.send_data(self.RAW_data_tag, self.data_header, self.ch_hit_data)
-                                np.savetxt(spill_file, self.data_header) #self.data_header)
-                                np.savetxt(spill_file, self.ch_hit_data)# self.ch_hit_data)
+#                                 np.savetxt(spill_file, self.data_header) #self.data_header)
+#                                 np.savetxt(spill_file, self.ch_hit_data)# self.ch_hit_data)
                         self.SoS_data_flag.set()
-#                         print "time needed for %s events : %s" %(multimodule_hits['event_number'][-1],(datetime.datetime.now()-start))
+                        print "time needed for %s events : %s without saving" %(self.multimodule_hits['event_number'][-1],(datetime.datetime.now()-start))
 #                     self.total_events += event_indices.shape[0]
                 
                         
     def stop(self):
+        self.logger.info('Stopping converter')
         self._stop_readout.set()
         for job in self.jobs:
             job.join()
-        self.logger.info('Stopping converter')
+        self.logger.info('All Workers Joined')
 
 
 if __name__ == '__main__':
