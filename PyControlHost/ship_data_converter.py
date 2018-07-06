@@ -280,7 +280,7 @@ class DataConverter(multiprocessing.Process):
         self.EoR_flag = multiprocessing.Event()
         self.SoS_flag = multiprocessing.Event()
         self.EoS_flag = multiprocessing.Event()
-        self.SoS_data_flag = multiprocessing.Event()
+        self.EoS_data_flag = multiprocessing.Event()
         self.worker_reset_flag = multiprocessing.Event()
         self.reset_multimodule_hits = multiprocessing.Event()
         self.worker_finished_flags= [multiprocessing.Event() for _ in range(self.n_modules)]
@@ -341,24 +341,25 @@ class DataConverter(multiprocessing.Process):
         if msg:
             self.logger.info(msg)
         with self.reset_lock:
-            for interpreter in self.interpreters:
-                interpreter.reset()
-            for flag in self.worker_finished_flags:
-                flag.clear()
-#             for hit in self.hits:
-#                 hit = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C'))    
-            
             self.n_readout = 0
             self.total_events = 0
             self.logger.info('last cycleID=%s'% self.cycle_ID.value)
             self.cycle_ID.value = cycleID # TODO: careful with multiprocessing values!
             self._stop_readout.clear()
+            for interpreter in self.interpreters:
+                interpreter.reset()
+            for hit in self.hits:
+                hit = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C'))
+            self.worker_reset_flag.set()
+            self.reset_multimodule_hits.set()
+            for worker_flag in self.worker_finished_flags:
+                worker_flag.clear()
             self.SoR_flag.clear()
             self.EoR_flag.clear()
             self.SoS_flag.clear()
             self.EoS_flag.clear()
-            self.SoS_data_flag.clear()
-            self.worker_reset_flag.set()
+            self.EoS_data_flag.clear()
+#             self.worker_reset_flag.set()
             self.logger.info('DataConverter has been reset')
 
     
@@ -367,29 +368,22 @@ class DataConverter(multiprocessing.Process):
         the cycleID is therefore converted to human readable string.
         format: year, month, day, hour, minute, second
         '''
-        for interpreter in self.interpreters:
-            interpreter.reset()
-#         for hit in self.hits:
-#             print hit.shape
-#             hit = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C'))
-#             print hit.shape
-        for worker_flag in self.worker_finished_flags:
-            worker_flag.clear()
-        self.worker_reset_flag.set()
-        self.reset_multimodule_hits.set()
+        self.EoS_data_flag.clear()
         self.file_date.value = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value /5.)).strftime("%Y_%m_%d_%H_%M_%S")
         self.logger('SoS reset finished')
 
     
     def EoS_reset(self):
-        for interpreter in self.interpreters:
-            interpreter.reset()
-        for hit in self.hits:
-            hit = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C'))
-        self.worker_reset_flag.set()
-        self.reset_multimodule_hits.set()
-        for worker_flag in self.worker_finished_flags:
-            worker_flag.clear()
+        '''after all events have been sent, the event arrays are emtpied, and interpreters are reset'''
+        with self.reset_lock:
+            for interpreter in self.interpreters:
+                interpreter.reset()
+            for hit in self.hits:
+                hit = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C'))
+            self.worker_reset_flag.set()
+            self.reset_multimodule_hits.set()
+            for worker_flag in self.worker_finished_flags:
+                worker_flag.clear()
     
     
     def analyze_raw_data(self, raw_data, module):
@@ -499,7 +493,7 @@ class DataConverter(multiprocessing.Process):
                 #TODO: check building of common event from all modules
                 with self.reset_lock:
                     start = datetime.datetime.now()
-                    if not self.SoS_data_flag.is_set(): # SoS_data_flag is set after all events are sent to dispatcher
+                    if not self.EoS_data_flag.is_set(): # SoS_data_flag is set after all events are sent to dispatcher
                         for pipe in self.pipes:
                             hit_array = pipe.recv()
                             self.multimodule_hits = np.hstack((self.multimodule_hits, hit_array))
@@ -535,7 +529,7 @@ class DataConverter(multiprocessing.Process):
                                 self.ch.send_data(self.RAW_data_tag, self.data_header, self.ch_hit_data)
 #                                 np.savetxt(spill_file, self.data_header) #self.data_header)
 #                                 np.savetxt(spill_file, self.ch_hit_data)# self.ch_hit_data)
-                        self.SoS_data_flag.set()
+                        self.EoS_data_flag.set()
                         print "time needed for %s events : %s without saving" %(self.multimodule_hits['event_number'][-1],(datetime.datetime.now()-start))
 #                     self.total_events += event_indices.shape[0]
                 
