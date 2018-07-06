@@ -18,7 +18,7 @@ typedef struct DataFrameHeader{
 typedef struct {
 	uint16_t channelId;
 	uint16_t hit_Data;
-	}RawDataHit;
+	}Hit;
 
 
 typedef struct {
@@ -47,7 +47,7 @@ typedef struct {
 //	return res;
 //	}
 
-unsigned short *build_EvtFrame(DataFrameHeader*& header, RawDataHit*& hits, const unsigned int& head_bytes, const unsigned int& hits_bytes)
+unsigned short *build_EvtFrame(DataFrameHeader*& header, Hit*& hits, const unsigned int& head_bytes, const unsigned int& hits_bytes)
 	{
 //  head_lenght and hits_length are size in byte of the respective array
 //  join header and hits array by memcopy, then send as one memory block
