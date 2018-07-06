@@ -7,10 +7,10 @@ from numba import njit, jit
 import numba
 import cProfile
 import cython
-import multiprocessing
+import multiprocessing, threading
 import time
 import logging
-from ctypes import c_ushort, c_int
+from ctypes import c_ushort, c_int, c_char_p
 
 from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
 from pybar_fei4_interpreter.data_histograming import PyDataHistograming
@@ -343,11 +343,13 @@ class DataConverter(multiprocessing.Process):
         with self.reset_lock:
             for interpreter in self.interpreters:
                 interpreter.reset()
-#             self.interpreter.reset()
+            for flag in self.worker_finished_flags:
+                flag.clear()
+#             for hit in self.hits:
+#                 hit = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C'))    
+            
             self.n_readout = 0
             self.total_events = 0
-            print self.cycle_ID
-            print type(self.cycle_ID)
             self.logger.info('last cycleID=%s'% self.cycle_ID.value)
             self.cycle_ID.value = cycleID # TODO: careful with multiprocessing values!
             self._stop_readout.clear()
@@ -356,17 +358,38 @@ class DataConverter(multiprocessing.Process):
             self.SoS_flag.clear()
             self.EoS_flag.clear()
             self.SoS_data_flag.clear()
+            self.worker_reset_flag.set()
             self.logger.info('DataConverter has been reset')
 
     
     def SoS_reset(self): # TODO: implement SoS and EoS reset.
-        self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value /5.)).strftime("%Y_%m_%d_%H_%M_%S")
-        for flag in self.worker_finished_flags:
-            flag.clear()
-        pass
+        ''' for each spill a file with the SHiP cycleID will be created,
+        the cycleID is therefore converted to human readable string.
+        format: year, month, day, hour, minute, second
+        '''
+        for interpreter in self.interpreters:
+            interpreter.reset()
+#         for hit in self.hits:
+#             print hit.shape
+#             hit = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C'))
+#             print hit.shape
+        for worker_flag in self.worker_finished_flags:
+            worker_flag.clear()
+        self.worker_reset_flag.set()
+        self.reset_multimodule_hits.set()
+        self.file_date.value = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value /5.)).strftime("%Y_%m_%d_%H_%M_%S")
+        self.logger('SoS reset finished')
+
     
     def EoS_reset(self):
-        pass
+        for interpreter in self.interpreters:
+            interpreter.reset()
+        for hit in self.hits:
+            hit = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C'))
+        self.worker_reset_flag.set()
+        self.reset_multimodule_hits.set()
+        for worker_flag in self.worker_finished_flags:
+            worker_flag.clear()
     
     
     def analyze_raw_data(self, raw_data, module):
@@ -394,13 +417,23 @@ class DataConverter(multiprocessing.Process):
         socket_pull = context.socket(zmq.SUB)  # subscriber
         socket_pull.setsockopt(zmq.SUBSCRIBE, '')  # do not filter any data
         socket_pull.connect(socket_addr)
-        self.logger.info("worker for module %s started, socket %s" % (moduleID,socket_addr))
-        while not self._stop_readout.wait(0.01) and not self.worker_finished_flags[moduleID].wait(0.01):  # use wait(), do not block here
+        self.logger.info("Worker started, socket %s" % (socket_addr))
+        while not self._stop_readout.wait(0.001) :  # use wait(), do not block here
 #             with self.reset_lock:
-            if self.EoS_flag.is_set():
-                send_end.send(self.hits[moduleID])
+            if self.EoS_flag.is_set(): # EoS_flag is set in run_control after reception of EoS command 
+                send_end.send(self.hits[moduleID]) # TODO: make sure all evts. are read out befor sending
                 self.worker_finished_flags[moduleID].set()
-                self.logger.info("module_%s worker finished received %s hits" % (moduleID, self.hits[moduleID].shape))
+                self.logger.info("Worker finished, received %s hits" % (self.hits[moduleID].shape)) # TODO: logger behaviour and content of hits after EoS reset is weird
+                
+#             if self.worker_reset_flag.is_set():
+#                 self.logger.info("started resetting worker")
+#                 self.hits[moduleID] = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C'))
+#                 self.worker_finished_flags[moduleID].clear() 
+#                 self.worker_reset_flag.clear()
+#                 self.logger.info('Worker has been reset')
+            if self.worker_finished_flags[moduleID].is_set() :
+                continue
+                
             try:
                 meta_data = socket_pull.recv_json(flags=zmq.NOBLOCK)
             except zmq.Again:
