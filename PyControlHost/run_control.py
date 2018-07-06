@@ -180,8 +180,14 @@ class RunControl(object):
         
         if self.command == 'Enable': # enable detector partition
             self.enabled = True
+            if not self.converter.is_alive():
+                self.converter.start()
+                self.conv_started = True
+            logger.info('Received Enable, starting DataConverter')
         elif self.command == 'Disable': #disable detector partition
             self.enabled = False
+            self.converter.stop()
+            logger.info('Received Disable, stopping DataConverter')
         elif self.command == 'SoR': # Start new pyBAR ExtTriggerScanShiP.
             self.SoR_rec = True
             if len(self.cmd) > 1 :
@@ -196,6 +202,7 @@ class RunControl(object):
                 self.conv_started = True
             else: 
                 self.converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
+            self.converter.SoR_flag.set()
             self.converter.run_number.Value = run_number
             #send special SoR header
             self.special_header['frameTime'] = 0xFF005C01
@@ -225,18 +232,20 @@ class RunControl(object):
                 self.converter.EoR_flag.set()
                 self.converter.reset(cycleID = self.cycle_ID(), msg='EoR command, resetting DataConverter') # reset interpreter and event counter
             else:
-                logger.error('Recieved EoR command to reset converter, but no converter running')
+                logger.error('Recieved EoR command to reset DataConverter, but no converter running')
             # send special EoR header
 #             self.special_header['frameTime'] = 0xFF005C02
 #             self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
 #             self.ch_com.send_done('EoR',self.partitionID, self.status)
-        elif self.command == 'SoS': # new spill. trigger counter will be reset by hardware signal. The software command triggers an empty header
+        elif self.command == 'SoS': # new spill. trigger counter will be reset by hardware signal. The software command triggers an empty header and resets of converter functions
             self.SoS_rec = True
+            self.converter.SoS_flag.set()
             self.converter.EoS_flag.clear()
             if len(self.cmd) > 1:
                 cycleID = np.uint64(self.cmd[1])
             else:
                 cycleID = 0 #self.cycle_ID()
+#             self.converter.SoS_reset()
             self.converter.cycle_ID.Value = cycleID
             logger.info('Recieved SoS header, cycleID = %s' % cycleID)
             self.special_header['frameTime'] = 0xFF005C03
