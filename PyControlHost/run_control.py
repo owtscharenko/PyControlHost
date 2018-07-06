@@ -24,7 +24,7 @@ logger = logging.getLogger('RunControl')
 
 class RunControl(object):
     
-    def __init__(self,dispatcher_addr, converter_addr, ports, configuration, partitionID):    
+    def __init__(self,dispatcher_addr, converter_addr, ports, configuration, partitionID, bcids):    
            
         self.status = 0
         self.enabled = True
@@ -35,6 +35,7 @@ class RunControl(object):
         self.commands = {'SoR','EoR','SoS','EoS','Enable','Disable','Stop'}
         self.partitionID = int(partitionID,16) # '0X0802' from 0800 to 0802
         self.DetName = 'Pixels' + partitionID[5:] + '_LocDaq_' + partitionID[2:]
+        self.bcids = bcids
         
         self.ch_com = CHostInterface()
         self.connect_CH(self.disp_addr,self.DetName)
@@ -278,11 +279,13 @@ if __name__ == '__main__':
     else:
         parser.error("incorrect number of arguments")
     ports = ['5001','5002','5003','5004','5005','5006','5007','5008']
+    bcids = 8
     rec = RunControl(dispatcher_addr,
                       converter_addr,
                       ports,
                       configuration,
-                      partitionID)
+                      partitionID,
+                      bcids)
     
     rec.receive()
 

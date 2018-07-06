@@ -295,7 +295,7 @@ class DataConverter(multiprocessing.Process):
         self.total_events = 0
         self.start_date = datetime.datetime(2015, 04, 8, 00, 00)
         self.cycle_ID = multiprocessing.Value('i',0)
-        self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value /5.)).strftime("%Y_%m_%d_%H_%M_%S")
+        self.file_date = multiprocessing.Value(c_char_p,(self.start_date + datetime.timedelta(seconds = self.cycle_ID.value /5.)).strftime("%Y_%m_%d_%H_%M_%S"))
         self.run_number = multiprocessing.Value('i',0)
         self.partitionID = partitionID # '0X0802' from 0800 to 0802 how to get this from scan instance?
         if disp_addr: # in case of direct call of DataConverter, the partitionID is handed over as hex TODO: fix this behavior
