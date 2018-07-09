@@ -29,12 +29,14 @@ class CHostReceiveHeader(multiprocessing.Process):
         self.cmdsize = np.ascontiguousarray(np.int8(self.cmd.nbytes))
         self._stop_readout = multiprocessing.Event()
         self.status = multiprocessing.Value('i',0)
+        self.head_received = multiprocessing.Event()
         self.send_end = send_end
     
     def run(self): # TODO: is not killed by ctrl+c in main loop
         while not self._stop_readout.wait(0.01):
             self.status.value = ch.get_head_wait('DAQCMD', self.cmdsize)
             if self.status.value >=0:
+                self.head_received.set()
                 self.status.value , cmd = ch.rec_cmd()
                 if self.status < 0:
                     self.logger.warning('Command could not be recieved')
