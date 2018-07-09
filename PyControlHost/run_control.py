@@ -45,8 +45,9 @@ class RunControl(object):
         self.SoR_rec = False
         self.EoS_rec = False
         self.SoS_rec = False
-        self.conv_started = False
+        self.converter_started = False
         self.cmd = []
+        self.run_number = 0
         self.command = 'none'
         self.scan_status = None
         self.special_header = np.empty(shape=(1,), dtype= FrHeader)
@@ -83,6 +84,7 @@ class RunControl(object):
         ''' 
         main loop for reception and execution of commands.
         starts threads corresponding to the command recieved.
+        Every command is acknowledged to the dispatcher first, upon successful execution of the command a done message is sent.
         '''
         
         if isinstance(current_thread(), _MainThread):
@@ -100,19 +102,19 @@ class RunControl(object):
         CH_head_reciever.name = 'CHostHeadReciever'
         CH_head_reciever.Daemon = True
         
-        try:
-            while True:
+        
+        while True:
+            try:
                 time.sleep(0.001) # TODO: why does this work? sleep should lock the global interpreter?
     #                 if self.status >=0 and self.ch_com.status >=0 :
     #                     self.status = ch.get_head_wait('DAQCMD', self.ch_com.cmdsize)
-    #                     print "yay got it"
     #                     if self.status >=0 and self.ch_com.status >=0 :
     #                         self.cmd = self.ch_com.get_cmd() # recieved command contains command word [0] and additional info [1]... different for each case
                 if not CH_head_reciever.is_alive():
-                    CH_head_reciever.start()
-                if not self.converter.is_alive() and self.conv_started:
+                    CH_head_reciever.start() # TODO: CH receiver does not terminate upon 2 x ctrl+c
+                if not self.converter.is_alive() and self.converter_started:
                     logging.error('\n\n\n         DataConverter was started but is not alive anymore \n\n')
-                    self.conv_started = False
+                    self.converter_started = False
                     raise RuntimeWarning
                 if recv_end.poll():
                     self.cmd = recv_end.recv()
@@ -127,6 +129,8 @@ class RunControl(object):
                         logger.error('Command=%s could not be identified' % self.cmd)
                 elif self.command in self.commands and CH_head_reciever.status.value >=0:
                     if self.command == 'SoR' and self.scan_status == 'RUNNING' and self.SoR_rec:
+                        self.special_header['frameTime'] = 0xFF005C01
+                        self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                         self.ch_com.send_done('SoR',self.partitionID, self.status)
                         self.SoR_rec = False
                     elif self.command == 'EoR' and self.EoR_rec:
@@ -139,11 +143,12 @@ class RunControl(object):
                             self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                             self.ch_com.send_done('EoR',self.partitionID, self.status)
                         self.EoR_rec = False
-                    elif self.command == 'SoS' and not self.converter.EoS_flag.wait(0.01) and self.SoS_rec:
-                        self.ch_com.send_done('SoS',self.partitionID, self.converter.total_events) # TODO: make sure send done is called after last trigger is read out
+                    elif self.converter.all_workers_finished.wait(0.01) and self.SoS_rec: # can not check for command = SoS because SoS done msg can only be sent after EoS (SoS is "done" after buffering last event. This is triggered bei EoS signal.)
+                        print self.command
+                        self.ch_com.send_done('SoS',self.partitionID, self.status) # TODO: make sure send done is called after last trigger is read out
                         self.SoS_rec = False
                     elif self.command == 'EoS' and self.converter.EoS_data_flag.wait(0.01) and self.EoS_rec:
-                        self.special_header['frameTime'] = 0xFF005C04 # TODO: send EoS header after last event from spill
+                        self.special_header['frameTime'] = 0xFF005C04
                         self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                         self.ch_com.send_done('EoS', self.partitionID, self.status)
                         self.converter.EoS_reset() # TODO: bad practice, reset should not be here but in react method
@@ -154,16 +159,26 @@ class RunControl(object):
                     break
                 else:
                     continue
-            self.scan_status = self.join_scan_thread(0.01)
-            logger.info('scan status : %s' % self.scan_status)
-            if self._stop == True:    
-                CH_head_reciever.stop()
-                self.converter.stop()
-                self.join_scan_thread(timeout = 0.01)
-                self.mngr.abort()
-            logger.error('Loop exited')
-        except sys.exit():
-            logger.error('RuntimeWarning, terminating')
+            except RuntimeWarning:
+                if self.converter_started == False:
+                    logger.info('Restarting DataConverter.')
+                    self.converter.start()
+                    self.converter_started = True
+                    continue
+                else:
+                    break
+        self.scan_status = self.join_scan_thread(0.01)
+        logger.info('scan status : %s' % self.scan_status)
+        if self._stop == True:    
+            CH_head_reciever.stop()
+            self.converter.stop()
+            self.join_scan_thread(timeout = 0.01)
+            self.mngr.abort()
+        logger.error('Loop exited')
+        
+#             
+#             else:
+#                 logger.error('RuntimeWarning, terminating')
             
 
             
@@ -233,40 +248,28 @@ class RunControl(object):
                 self.converter.reset(cycleID = self.cycle_ID(), msg='EoR command, resetting DataConverter') # reset interpreter and event counter
             else:
                 logger.error('Recieved EoR command to reset DataConverter, but no converter running')
-            # send special EoR header
-#             self.special_header['frameTime'] = 0xFF005C02
-#             self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
-#             self.ch_com.send_done('EoR',self.partitionID, self.status)
-        elif self.command == 'SoS': # new spill. trigger counter will be reset by hardware signal. The software command triggers an empty header and resets of converter functions
+        elif self.command == 'SoS': # new spill. Trigger counter will be reset by hardware signal. The software command triggers an empty header and resets of converter functions
             self.SoS_rec = True
             self.converter.SoS_flag.set()
-            self.converter.EoS_flag.clear()
             if len(self.cmd) > 1:
                 cycleID = np.uint64(self.cmd[1])
             else:
-                cycleID = 0 #self.cycle_ID()
-#             self.converter.SoS_reset()
-            self.converter.cycle_ID.Value = cycleID
+                cycleID = self.cycle_ID() # create own cycleID if SoS command does not provide
+            self.converter.cycle_ID.value = cycleID
             logger.info('Recieved SoS header, cycleID = %s' % cycleID)
+            self.converter.SoS_reset()
             self.special_header['frameTime'] = 0xFF005C03
             self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
-            
         elif self.command == 'EoS': # trigger EoS header, sent after last event
             self.EoS_rec = True
             logger.info('recieved EoS, local cycleID:%s' % self.cycle_ID())
             self.converter.EoS_flag.set()
-#             if self.converter.SoS_data_flag.wait(0.001):
-#                 self.special_header['frameTime'] = 0xFF005C04 # TODO: send EoS header after last event from spill
-#                 self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
-#                 self.ch_com.send_done('EoS', self.partitionID, self.status)
         elif self.command == 'Stop':
             logger.info('Recieved Stop! Leaving loop, aborting all functions')
             self._stop = True
 
 
             
-             
-
 
 if __name__ == '__main__':
     

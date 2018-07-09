@@ -384,7 +384,7 @@ class DataConverter(multiprocessing.Process):
             self.reset_multimodule_hits.set()
             for worker_flag in self.worker_finished_flags:
                 worker_flag.clear()
-    
+            self.logger.info('EoS reset finished')
     
     def analyze_raw_data(self, raw_data, module):
         return self.interpreters[module].interpret_raw_data(raw_data)
@@ -456,18 +456,16 @@ class DataConverter(multiprocessing.Process):
                     module_hits['moduleID'] = moduleID
                     
                     self.hits[moduleID] = np.r_[self.hits[moduleID],module_hits]
-#                     self.logger.info("module_%s recieved %s hits" %(moduleID,self.hits[moduleID].shape))
 
 
 
     def run(self):
         ''' create workers upon start and collect data after EoS'''
         
-#         self.multimodule_hits = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype))
         self.jobs = []
         self.pipes = []
-        
-#         for module in range(self.n_modules): # TODO: fast enough? only possible to check with 8 FEs
+
+#         for module in range(self.n_modules):
 #             recv_end, send_end = multiprocessing.Pipe(False)
 #             worker = multiprocessing.Process(target = self.module_worker, args =(self.address + self.ports[module], module, send_end))
 #             worker.name = 'RecieverModule_%s' % module
@@ -484,53 +482,67 @@ class DataConverter(multiprocessing.Process):
             self.pipes.append(recv_end)
             worker.start()
         
-        while not self._stop_readout.wait(0.1):
+        while not self._stop_readout.wait(0.01):
             if self.reset_multimodule_hits.is_set(): # set by SoS_reset upon reception of SoS signal
                 self.multimodule_hits = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype))
                 self.reset_multimodule_hits.clear()
-#                 self.logger.info('Main array has been reset')
+                print "multiarray clear shape = %s" % self.multimodule_hits.shape
+            
             if self.EoS_flag.is_set(): # EoS_flag is set in run_control after reception of EoS command 
                 #TODO: check building of common event from all modules
                 with self.reset_lock:
                     start = datetime.datetime.now()
-                    if not self.EoS_data_flag.is_set(): # SoS_data_flag is set after all events are sent to dispatcher
-                        for pipe in self.pipes:
-                            hit_array = pipe.recv()
-                            self.multimodule_hits = np.hstack((self.multimodule_hits, hit_array))
-                        
-                        self.SoS_flag.clear()    
-                        self.multimodule_hits.sort(order='event_number')
-                        event_numbers , indices = np.unique(self.multimodule_hits['event_number'],return_index = True)
-                        print "time for sorting:", datetime.datetime.now() - start
-                        n_events = indices.shape[0]
-                        print "nevents multiarray" , n_events , "shape multiarray" , self.multimodule_hits.shape
-                        with open("./RUN_%s/%s.txt" % (self.run_number.value, self.file_date.value),'a+') as spill_file:
-                            for i, index in enumerate(indices):
-                                if i == n_events-1:
-                                    event = self.multimodule_hits[index:]
-                                else:
-                                    event = self.multimodule_hits[index:indices[i+1]]
-    #                             print index, indices[i+1]
-    #                             print event 
-                                channelID = np.bitwise_or(event['row']<<7,event['column'],order='C',dtype='uint16')
-                                hit_data = np.bitwise_or(np.bitwise_or(event['tot']<<4,event['moduleID'])<<8,
-                                                         np.bitwise_or(0<<4,event['relative_BCID']),order='C',dtype='uint16')
-                                self.ch_hit_data = np.empty(channelID.shape[0], dtype = Hit)
-                                self.ch_hit_data["channelID"] = channelID
-                                self.ch_hit_data["hit_data"] = hit_data
-                                # each event needs a frame header
-                                self.data_header = np.empty(shape=(1,), dtype= FrHeader)
-                                self.data_header['size'] = channelID.nbytes + 16
-                                self.data_header['partID'] = self.partitionID
-                                self.data_header['cycleID'] = self.cycle_ID.value
-                                self.data_header['frameTime'] = event[0]['trigger_time_stamp']
-                                self.data_header['timeExtent'] = 15
-                                self.data_header['flags'] = 0
-                                self.ch.send_data(self.RAW_data_tag, self.data_header, self.ch_hit_data)
-#                                 np.savetxt(spill_file, self.data_header) #self.data_header)
-#                                 np.savetxt(spill_file, self.ch_hit_data)# self.ch_hit_data)
-                        self.EoS_data_flag.set()
-                        print "time needed for %s events : %s without saving" %(self.multimodule_hits['event_number'][-1],(datetime.datetime.now()-start))
+
+                    if not self.EoS_data_flag.is_set(): # EoS_data_flag is set after all events are sent to dispatcher
+                        for flag in self.worker_finished_flags: # wait for all workers to finish, this also trigger the SoS DONE message
+                            if flag.is_set():
+                                self.all_workers_finished.set()
+                            else:
+                                self.all_workers_finished.clear()
+                            
+                        if self.all_workers_finished.is_set():
+                            self.logger.info('All workers finished, starting conversion')
+                            
+                            for pipe in self.pipes:
+                                hit_array = pipe.recv()
+                                self.multimodule_hits = np.hstack((self.multimodule_hits, hit_array))
+    #                         print "test pipe", self.pipes[0].recv(), "pipe print end"
+                            self.SoS_flag.clear()    
+                            self.multimodule_hits.sort(order='event_number')
+                            event_numbers , indices = np.unique(self.multimodule_hits['event_number'],return_index = True)
+                            print "time for sorting:", datetime.datetime.now() - start
+                            n_events = indices.shape[0]
+                            print "nevents multiarray" , n_events , "shape multiarray %s" % self.multimodule_hits.shape
+                            
+                            with open("./RUN_%03d/%s.txt" % (self.run_number.value, self.file_date), 'a+') as spill_file: # TODO: bad practice. File name should be created in SoS rese, which does not work so far...
+                                self.logger.info('opening run file %s' % spill_file)
+                                for i, index in enumerate(indices):
+                                    print "now in loop"
+                                    if i == n_events-1:
+                                        event = self.multimodule_hits[index:]
+                                    else:
+                                        event = self.multimodule_hits[index:indices[i+1]]
+        #                             print index, indices[i+1]
+        #                             print event 
+                                    channelID = np.bitwise_or(event['row']<<7,event['column'],order='C',dtype='uint16')
+                                    hit_data = np.bitwise_or(np.bitwise_or(event['tot']<<4,event['moduleID'])<<8,
+                                                             np.bitwise_or(0<<4,event['relative_BCID']),order='C',dtype='uint16')
+                                    self.ch_hit_data = np.empty(channelID.shape[0], dtype = Hit)
+                                    self.ch_hit_data["channelID"] = channelID
+                                    self.ch_hit_data["hit_data"] = hit_data
+                                    # each event needs a frame header
+                                    self.data_header = np.empty(shape=(1,), dtype= FrHeader)
+                                    self.data_header['size'] = channelID.nbytes + 16
+                                    self.data_header['partID'] = self.partitionID
+                                    self.data_header['cycleID'] = self.cycle_ID.value
+                                    self.data_header['frameTime'] = event[0]['trigger_time_stamp']
+                                    self.data_header['timeExtent'] = 15
+                                    self.data_header['flags'] = 0
+                                    self.ch.send_data(self.RAW_data_tag, self.data_header, self.ch_hit_data)
+    #                                 np.savetxt(spill_file, self.data_header) #self.data_header)
+    #                                 np.savetxt(spill_file, self.ch_hit_data)# self.ch_hit_data)
+                            self.EoS_data_flag.set()
+#                         print "time needed for %s events : %s without saving" %(self.multimodule_hits['event_number'][-1],(datetime.datetime.now()-start))
 #                     self.total_events += event_indices.shape[0]
                 
                         
