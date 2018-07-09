@@ -189,20 +189,39 @@ class RunControl(object):
     def react(self):
         ''' 
         for each DAQ command a specific reaction is executed.
-        In general reception of every command has to be acknowledged to the dispatcher 
-        and upon successful execution a DONE message has to be sent.
+        
+        Enable:    The DataConverter will be started and send data to the dispatcher
+        
+        Disable:    The Detector will continue taking data but the DataConverter will be stopped.
+                    in this way no data will be sent to the dispatcher.
+        
+        SoR:        Starts a new Run, this means a new "ExtTriggerScanSHiP". If the DataConverter is not alive it will be started.
+        
+        EoR:        Ends the run, the "ExtTriggerScanSHiP" will be stopped and the DataConverter will be reset.
+        
+        SoS:        Determinates the next spill, the cycleID for saving the Data is updated, and Workers are set to receive data again
+        
+        EoS:        Tells the loop when to start sending data. Starts conversion of collected hits. When all events are sent out, the DataConverter
+                    will be reset and wait for the next SoS.
+                    
+        Stop:       All processes will be terminated. Realized with a flag which will stop the "receive" loop and all processes
         '''
         
         if self.command == 'Enable': # enable detector partition
             self.enabled = True
             if not self.converter.is_alive():
                 self.converter.start()
-                self.conv_started = True
-            logger.info('Received Enable, starting DataConverter')
+                self.converter_started = True
+                logger.info('Received Enable, starting DataConverter')
+            else:
+                logger.info('Received Enable.')
         elif self.command == 'Disable': #disable detector partition
             self.enabled = False
-            self.converter.stop()
-            logger.info('Received Disable, stopping DataConverter')
+            if self.converter.is_alive():
+                self.converter.stop()
+                logger.info('Received Disable, stopping DataConverter')
+            else:
+                logger.info('Received Disable.')
         elif self.command == 'SoR': # Start new pyBAR ExtTriggerScanShiP.
             self.SoR_rec = True
             if len(self.cmd) > 1 :
