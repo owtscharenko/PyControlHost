@@ -284,6 +284,7 @@ class DataConverter(multiprocessing.Process):
         self.worker_reset_flag = multiprocessing.Event()
         self.reset_multimodule_hits = multiprocessing.Event()
         self.worker_finished_flags= [multiprocessing.Event() for _ in range(self.n_modules)]
+        self.all_workers_finished = multiprocessing.Event()
         self.reset_lock = multiprocessing.Lock() 
         
         self.raw_data_queue = multiprocessing.Queue()
@@ -419,12 +420,14 @@ class DataConverter(multiprocessing.Process):
         socket_pull.setsockopt(zmq.SUBSCRIBE, '')  # do not filter any data
         socket_pull.connect(socket_addr)
         self.logger.info("Worker started, socket %s" % (socket_addr))
-        while not self._stop_readout.wait(0.001) :  # use wait(), do not block here
+        while not self._stop_readout.wait(0.01) :  # use wait(), do not block here
 #             with self.reset_lock:
-            if self.EoS_flag.is_set(): # EoS_flag is set in run_control after reception of EoS command 
+            if self.EoS_flag.is_set() : # EoS_flag is set in run_control after reception of EoS command 
                 send_end.send(self.hits[moduleID]) # TODO: make sure all evts. are read out befor sending
-                self.worker_finished_flags[moduleID].set()
-                self.logger.info("Worker finished, received %s hits" % (self.hits[moduleID].shape)) # TODO: logger behaviour and content of hits after EoS reset is weird
+                if not self.worker_finished_flags[moduleID].is_set():
+                    self.logger.info("Worker finished, received %s hits" % (self.hits[moduleID].shape))
+                    self.worker_finished_flags[moduleID].set()
+                
                 
 #             if self.worker_reset_flag.is_set():
 #                 self.logger.info("started resetting worker")
@@ -433,8 +436,11 @@ class DataConverter(multiprocessing.Process):
 #                 self.worker_reset_flag.clear()
 #                 self.logger.info('Worker has been reset')
             if self.worker_finished_flags[moduleID].is_set() :
+                if self.hits[moduleID].shape[0] > 0:
+                    self.hits[moduleID] = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C'))
+                    self.logger.info('hit array now empty')
+#                 print "single hit array shape %s" % self.hits[moduleID].shape
                 continue
-                
             try:
                 meta_data = socket_pull.recv_json(flags=zmq.NOBLOCK)
             except zmq.Again:
