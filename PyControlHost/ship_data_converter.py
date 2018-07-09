@@ -295,9 +295,10 @@ class DataConverter(multiprocessing.Process):
         self.total_events = 0
         self.start_date = datetime.datetime(2015, 04, 8, 00, 00)
         self.cycle_ID = multiprocessing.Value('i',0)
-        self.file_date = multiprocessing.Value(c_char_p,(self.start_date + datetime.timedelta(seconds = self.cycle_ID.value /5.)).strftime("%Y_%m_%d_%H_%M_%S"))
+        self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value /5.)).strftime("%Y_%m_%d_%H_%M_%S")
         self.run_number = multiprocessing.Value('i',0)
-        self.partitionID = partitionID # '0X0802' from 0800 to 0802 how to get this from scan instance?
+        self.spill_file_name = './default.txt'
+        self.partitionID = partitionID # '0X0802' from 0800 to 0802 
         if disp_addr: # in case of direct call of DataConverter, the partitionID is handed over as hex TODO: fix this behavior
             self.DetName = 'Pixels' + partitionID[4:] + '_LocDaq_0' + partitionID[2:]
             self.RAW_data_tag = 'RAW_0' + partitionID[2:]
@@ -345,6 +346,8 @@ class DataConverter(multiprocessing.Process):
             self.total_events = 0
             self.logger.info('last cycleID=%s'% self.cycle_ID.value)
             self.cycle_ID.value = cycleID # TODO: careful with multiprocessing values!
+            self.run_number.value = 0
+            self.spill_file_name = './default.txt'
             self._stop_readout.clear()
             for interpreter in self.interpreters:
                 interpreter.reset()
@@ -354,23 +357,27 @@ class DataConverter(multiprocessing.Process):
             self.reset_multimodule_hits.set()
             for worker_flag in self.worker_finished_flags:
                 worker_flag.clear()
+            self.all_workers_finished.clear()
             self.SoR_flag.clear()
             self.EoR_flag.clear()
             self.SoS_flag.clear()
             self.EoS_flag.clear()
             self.EoS_data_flag.clear()
-#             self.worker_reset_flag.set()
             self.logger.info('DataConverter has been reset')
 
     
-    def SoS_reset(self): # TODO: implement SoS and EoS reset.
+    def SoS_reset(self): 
         ''' for each spill a file with the SHiP cycleID will be created,
         the cycleID is therefore converted to human readable string.
         format: year, month, day, hour, minute, second
         '''
-        self.EoS_data_flag.clear()
-        self.file_date.value = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value /5.)).strftime("%Y_%m_%d_%H_%M_%S")
-        self.logger('SoS reset finished')
+        with self.reset_lock:
+            self.EoS_data_flag.clear()
+            self.EoS_flag.clear()
+            self.all_workers_finished.clear()
+            self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value /5.)).strftime("%Y_%m_%d_%H_%M_%S")
+            self.spill_file_name = "./RUN_%03d/%s.txt" % (self.run_number.value, self.file_date) 
+            self.logger.info('SoS reset finished')
 
     
     def EoS_reset(self):

@@ -225,23 +225,20 @@ class RunControl(object):
         elif self.command == 'SoR': # Start new pyBAR ExtTriggerScanShiP.
             self.SoR_rec = True
             if len(self.cmd) > 1 :
-                run_number = self.cmd[1]
+                self.run_number = int(self.cmd[1])
             else:
-                run_number = None
-            if not os.path.exists("./RUN_%s/" % run_number):
-                os.makedirs("./RUN_%s/" % run_number)
+                self.run_number = 0
+            if not os.path.exists("./RUN_%03d/" % self.run_number):
+                os.makedirs("./RUN_%03d/" % self.run_number)
             if not self.converter.is_alive():
                 self.converter.start()
-                print "converter pid :", self.converter.pid
-                self.conv_started = True
+                self.converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
+                self.converter_started = True
             else: 
                 self.converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
             self.converter.SoR_flag.set()
-            self.converter.run_number.Value = run_number
-            #send special SoR header
-            self.special_header['frameTime'] = 0xFF005C01
-            self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
-            logger.info('Sent SoR header')
+            with multiprocessing.Lock():
+                self.converter.run_number.value = self.run_number
             #start pybar trigger scan
             self.join_scan_thread = self.mngr.run_run(ThresholdScan, use_thread=True, catch_exception=False)
             self.scan_status = self.join_scan_thread(0.01)
@@ -254,7 +251,6 @@ class RunControl(object):
 #             if self.scan_status == 'RUNNING':
 #                 self.ch_com.send_done('SoR',self.partitionID, self.status)
         elif self.command == 'EoR': # stop existing pyBAR ExtTriggerScanShiP
-#             logger.info('Recieved EoR command')
             self.EoR_rec = True
             if self.mngr.current_run.__class__.__name__ == 'ThresholdScan':
 #                 self.join_scan_thread(timeout = 0.01)
