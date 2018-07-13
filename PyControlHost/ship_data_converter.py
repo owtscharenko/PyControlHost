@@ -3,7 +3,7 @@ import os
 import zmq
 import numpy as np
 import datetime
-from numba import njit, jit
+from numba import njit
 import numba
 import cProfile
 import cython
@@ -65,35 +65,6 @@ def process_data_numba(data_array, flag=0):
         ch_2nd_dataword = np.uint16(data_array['tot'][i]<<12 ^ moduleID<<8 ^ flag<<4 ^ np.uint8(data_array['relative_BCID'][i]))  
         ch_hit_data.extend((channelID, ch_2nd_dataword))
     return ch_hit_data
-
-
-def build_header(n_hits, partitionID, cycleID, trigger_timestamp, bcids=15, flag=0):
-    """
-    builds data frame header from input information,
-    python variables have to be converted to bitstrings.
-
-    input variables:
-    -----------------
-        n_hits: int , used to calculate length of data frame, 1 hit = 4 byte
-        partitionID: int, fixed for each MMC3 board
-        cycleID: int, see below, provided by run control
-        trigger_timestamp: int, used as frameTime (see below)
-
-    format:
-        size (2 byte): length of data frame in bytes including header
-        partitionID (2 byte) = 0000 to 0002
-        cycleIdentifier (4 byte): time of spill in SHiP time format: 0.2 seconds steps since the 8 April 2015
-        frameTime (4 byte) = trigger_timestamp:  start of trigger window relative to SoC in 25ns steps
-        timeExtent (2 byte) = relBCID : length of the trigger window in 25ns steps
-        flags (2 byte) = empty for now
-
-    """
-    data_header = (n_hits*4+16)<<112 ^ partitionID<<96 ^ cycleID<<64 ^ trigger_timestamp<<32 ^ bcids<<16 ^ flag # may not work as expected: getsizeof(2**128) = 44 byte
-#     data_header = [(n_hits*4+16)<<48 ^ partitionID<<32 ^ cycleID , trigger_timestamp<<32 ^ bcids<<16 ^ flag] # two 64bit int may be better than one 128 bit int
-#         self.data_header = bitarray()
-#         self.data_header.extend(np.binary_repr(n_hits*4*16<<112 ^ partitionID<<96 ^ cycleID<<64 ^ trigger_timestamp<<32 ^ bcids<<16 ^ flag, width=128))
-
-    return data_header
 
 
 @njit
@@ -169,82 +140,73 @@ def build_data(cycleID, partitionID, event_numbers, multimodule_hits, hit_data_d
         data.append(ch_hit_data)
     return headers, data
 
+
 @njit
 def _new_event(event_number_1, event_number_2):
     'Detect a new event by checking if the event number of the actual hit is the actual event number'
     return event_number_1 != event_number_2
+   
+        
+@njit  
+def merge_hits_tables(h1, h2, h3, h4, h5, h6, h7, h8, result):
+    min_event_1 = h1["event_number"].min()
+    min_event_2 = h2["event_number"].min()
+    min_event_3 = h3["event_number"].min()
+    min_event_4 = h4["event_number"].min()
+    min_event_5 = h5["event_number"].min()
+    min_event_6 = h6["event_number"].min()
+    min_event_7 = h7["event_number"].min()
+    min_event_8 = h8["event_number"].min()
 
-@njit
-def sort_mutlimodule_hits(multimodule_hits):
-    'sort array'
-    return multimodule_hits.sort()
-
-@njit
-def build_from_sorted(multimodule_hits):
-    'build events from sorted array'
-    total_hits = multimodule_hits.shape[0]
-    event_number = multimodule_hits[0]['event_number']
-    start_event_hit_index = 0
+    max_event_1 = h1["event_number"].max()
+    max_event_2 = h2["event_number"].max()
+    max_event_3 = h3["event_number"].max()
+    max_event_4 = h4["event_number"].max()
+    max_event_5 = h5["event_number"].max()
+    max_event_6 = h6["event_number"].max()
+    max_event_7 = h7["event_number"].max()
+    max_event_8 = h8["event_number"].max()
     
-    for i in range(total_hits):
-        if _new_event(multimodule_hits[i]['event_number'], event_number):
-            pass
-            
+    min_event = min(min_event_1, min_event_2, min_event_3, min_event_4, min_event_5, min_event_6, min_event_7, min_event_8)
+    max_event = max(max_event_1, max_event_2, max_event_3, max_event_4, max_event_5, max_event_6, max_event_7, max_event_8)
+    
+    i, i1, i2, i3, i4, i5, i6, i7, i8 = 0, 0, 0, 0, 0, 0, 0, 0, 0
+    
+    for event in range(min_event, max_event + 1):
+        while i1 < h1.shape[0] and h1[i1]["event_number"] == event:
+            result[i] = h1[i1]
+            i += 1
+            i1 += 1
+        while i2 < h1.shape[0] and h2[i2]["event_number"] == event:
+            result[i] = h2[i2]
+            i += 1
+            i2 += 1
+        while i3 < h3.shape[0] and h3[i3]["event_number"] == event:
+            result[i] = h3[i3]
+            i += 1
+            i3 += 1
+        while i4 < h4.shape[0] and h4[i4]["event_number"] == event:
+            result[i] = h4[i4]
+            i += 1
+            i4 += 1
+        while i5 < h5.shape[0] and h5[i5]["event_number"] == event:
+            result[i] = h5[i5]
+            i += 1
+            i5 += 1
+        while i6 < h6.shape[0] and h6[i6]["event_number"] == event:
+            result[i] = h6[i6]
+            i += 1
+            i6 += 1
+        while i7 < h7.shape[0] and h7[i7]["event_number"] == event:
+            result[i] = h7[i7]
+            i += 1
+            i7 += 1
+        while i8 < h8.shape[0] and h8[i8]["event_number"] == event:
+            result[i] = h8[i8]
+            i += 1
+            i8 += 1
 
-@njit
-def build_data_while(cycleID, partitionID,hit_arrays, event_numbers):
-    a,b,c,d,e,f,g,h = 0
-    hit_list = []
-    flag = np.zeros((8,1))
-    it = np.nditer(event_numbers,flags=['external_loop'])
-    for _ in hit_arrays:
-        module_hits = []
-        hit_list.append(module_hits)
-    while not it.finished:
-        if hit_arrays[0]['event_number'][a] == event_number:
-            hit_list[0].append(hit_arrays[0][a])
-            a +=1
-        else:
-            flag[0] = True
-        if hit_arrays[1]['event_number'][b] == event_number:
-            hit_list[1].append(hit_arrays[1][b])
-            b +=1
-        else:
-            flag[1] = True
-        if hit_arrays[2]['event_number'][c] == event_number:
-            hit_list[2].append(hit_arrays[2][c])
-            c +=1
-        else:
-            flag[2] = True
-        if hit_arrays[3]['event_number'][d] == event_number:
-            hit_list[3].append(hit_arrays[3][d])
-            d +=1
-        else:
-            flag[3] = True
-        if hit_arrays[4]['event_number'][e] == event_number:
-            hit_list[4].append(hit_arrays[4][e])
-            e +=1
-        else:
-            flag[4] = True
-        if hit_arrays[5]['event_number'][f] == event_number:
-            hit_list[5].append(hit_arrays[5][f])
-            f +=1
-        else:
-            flag[5] = True
-        if hit_arrays[6]['event_number'][g] == event_number:
-            hit_list[6].append(hit_arrays[6][g])
-            g +=1
-        else:
-            flag[6] = True
-        if hit_arrays[7]['event_number'][h] == event_number:
-            hit_list[7].append(hit_arrays[7][h])
-            h +=1
-        else:
-            flag[7] = True
-        if flag.all:
-            it.iternext()
-        
-        
+
 class DataConverter(multiprocessing.Process):
 
     def __init__(self, pybar_addr, ports, partitionID, disp_addr=None):
@@ -284,6 +246,7 @@ class DataConverter(multiprocessing.Process):
         self.worker_reset_flag = multiprocessing.Event()
         self.reset_multimodule_hits = multiprocessing.Event()
         self.worker_finished_flags= [multiprocessing.Event() for _ in range(self.n_modules)]
+        self.arrays_read_flag = multiprocessing.Event()
         self.all_workers_finished = multiprocessing.Event()
         self.reset_lock = multiprocessing.Lock() 
         
@@ -394,6 +357,7 @@ class DataConverter(multiprocessing.Process):
                 worker_flag.clear()
             self.logger.info('EoS reset finished')
     
+    
     def analyze_raw_data(self, raw_data, module):
         return self.interpreters[module].interpret_raw_data(raw_data)
 
@@ -423,7 +387,8 @@ class DataConverter(multiprocessing.Process):
         while not self._stop_readout.wait(0.01) :  # use wait(), do not block here
 #             with self.reset_lock:
             if self.EoS_flag.is_set() : # EoS_flag is set in run_control after reception of EoS command 
-                send_end.send(self.hits[moduleID]) # TODO: make sure all evts. are read out befor sending
+#                 send_end.send(self.hits[moduleID]) # TODO: make sure all evts. are read out befor sending
+#                 self.logger.info('hit table was sent')
                 if not self.worker_finished_flags[moduleID].is_set():
                     self.logger.info("Worker finished, received %s hits" % (self.hits[moduleID].shape))
                     self.worker_finished_flags[moduleID].set()
@@ -435,11 +400,10 @@ class DataConverter(multiprocessing.Process):
 #                 self.worker_finished_flags[moduleID].clear() 
 #                 self.worker_reset_flag.clear()
 #                 self.logger.info('Worker has been reset')
-            if self.worker_finished_flags[moduleID].is_set() :
+            if self.worker_finished_flags[moduleID].is_set() and self.arrays_read_flag.is_set() :
                 if self.hits[moduleID].shape[0] > 0:
                     self.hits[moduleID] = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C'))
-                    self.logger.info('hit array now empty')
-#                 print "single hit array shape %s" % self.hits[moduleID].shape
+                    self.logger.info('Hit array has been reset')
                 continue
             try:
                 meta_data = socket_pull.recv_json(flags=zmq.NOBLOCK)
@@ -470,8 +434,7 @@ class DataConverter(multiprocessing.Process):
                     
                     self.hits[moduleID] = np.r_[self.hits[moduleID],module_hits]
 
-
-
+    
     def run(self):
         ''' create workers upon start and collect data after EoS'''
         
@@ -496,41 +459,51 @@ class DataConverter(multiprocessing.Process):
             worker.start()
         
         while not self._stop_readout.wait(0.01):
-            if self.reset_multimodule_hits.is_set(): # set by SoS_reset upon reception of SoS signal
-                self.multimodule_hits = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype))
-                self.reset_multimodule_hits.clear()
-                print "multiarray clear shape = %s" % self.multimodule_hits.shape
+#             if self.reset_multimodule_hits.is_set(): # set by SoS_reset upon reception of SoS signal
+#                 self.multimodule_hits = np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype))
+#                 self.reset_multimodule_hits.clear()
+#                 print "multiarray clear shape = %s" % self.multimodule_hits.shape
             
             if self.EoS_flag.is_set(): # EoS_flag is set in run_control after reception of EoS command 
                 #TODO: check building of common event from all modules
                 with self.reset_lock:
                     start = datetime.datetime.now()
-
                     if not self.EoS_data_flag.is_set(): # EoS_data_flag is set after all events are sent to dispatcher
-                        for flag in self.worker_finished_flags: # wait for all workers to finish, this also trigger the SoS DONE message
+                        for flag in self.worker_finished_flags: # wait for all workers to finish, this also triggers the SoS DONE message
                             if flag.is_set():
                                 self.all_workers_finished.set()
                             else:
                                 self.all_workers_finished.clear()
-                            
                         if self.all_workers_finished.is_set():
+#                             for pipe in self.pipes:
+#                                 print "pipe full? " , pipe.poll()
                             self.logger.info('All workers finished, starting conversion')
+                            nhits = 0
+                            for hit_array in self.hits:
+                                nhits += hit_array.shape[0]
+#                                 hit_arrays.append(pipe.recv())
+#                                 self.array_read_flag[pipe].set()
+                            start = datetime.datetime.now()
+                            self.multimodule_hits = np.ascontiguousarray(np.empty(shape=(nhits,),dtype = self.multi_chip_event_dtype))
                             
-                            for pipe in self.pipes:
-                                hit_array = pipe.recv()
-                                self.multimodule_hits = np.hstack((self.multimodule_hits, hit_array))
-    #                         print "test pipe", self.pipes[0].recv(), "pipe print end"
-                            self.SoS_flag.clear()    
-                            self.multimodule_hits.sort(order='event_number')
+                            merge_hits_tables(self.hits[0],self.hits[1],self.hits[2],self.hits[3],self.hits[4],
+                                              self.hits[5],self.hits[6],self.hits[7],self.multimodule_hits)
+                            self.arrays_read_flag.set()
+#                             for pipe in self.pipes:
+#                                 hit_array = pipe.recv()
+#                                 self.multimodule_hits = np.hstack((self.multimodule_hits, hit_array))
+                                
+                            self.SoS_flag.clear()  
+                              
+#                             self.multimodule_hits.sort(order='event_number')
                             event_numbers , indices = np.unique(self.multimodule_hits['event_number'],return_index = True)
                             print "time for sorting:", datetime.datetime.now() - start
                             n_events = indices.shape[0]
-                            print "nevents multiarray" , n_events , "shape multiarray %s" % self.multimodule_hits.shape
-                            
+                            print "nevents = %s , nhits = %s" %(n_events, nhits)
                             with open("./RUN_%03d/%s.txt" % (self.run_number.value, self.file_date), 'a+') as spill_file: # TODO: bad practice. File name should be created in SoS rese, which does not work so far...
                                 self.logger.info('opening run file %s' % spill_file)
+                                
                                 for i, index in enumerate(indices):
-                                    print "now in loop"
                                     if i == n_events-1:
                                         event = self.multimodule_hits[index:]
                                     else:
@@ -552,10 +525,10 @@ class DataConverter(multiprocessing.Process):
                                     self.data_header['timeExtent'] = 15
                                     self.data_header['flags'] = 0
                                     self.ch.send_data(self.RAW_data_tag, self.data_header, self.ch_hit_data)
-    #                                 np.savetxt(spill_file, self.data_header) #self.data_header)
-    #                                 np.savetxt(spill_file, self.ch_hit_data)# self.ch_hit_data)
+                                    np.savetxt(spill_file, self.data_header) #self.data_header)
+                                    np.savetxt(spill_file, self.ch_hit_data)# self.ch_hit_data)
                             self.EoS_data_flag.set()
-#                         print "time needed for %s events : %s without saving" %(self.multimodule_hits['event_number'][-1],(datetime.datetime.now()-start))
+                            print "time needed for %s events : %s with saving" %(self.multimodule_hits['event_number'][-1],(datetime.datetime.now()-start))
 #                     self.total_events += event_indices.shape[0]
                 
                         

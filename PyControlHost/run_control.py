@@ -97,6 +97,7 @@ class RunControl(object):
         self.converter.name = 'DataConverter'
 #             converter.daemon = True
         self.mngr = RunManager(self.pybar_conf)
+        self.join_scan_thread = None
         recv_end, send_end = multiprocessing.Pipe(False)
         CH_head_reciever = CHostReceiveHeader(send_end)
         CH_head_reciever.name = 'CHostHeadReciever'
@@ -116,7 +117,7 @@ class RunControl(object):
                     logging.error('\n\n\n         DataConverter was started but is not alive anymore \n\n')
                     self.converter_started = False
                     raise RuntimeWarning
-                if recv_end.poll():
+                if recv_end.poll(): # look whether there is a command in pipe
                     self.cmd = recv_end.recv()
                     if len(self.cmd) > 1:
                         self.command = self.cmd[0]
@@ -124,15 +125,19 @@ class RunControl(object):
                         self.command = self.cmd
                     if self.command in self.commands and self.ch_com.status >=0:
                         self.ch_com.send_ack(tag='DAQACK',msg = '%s %04X %s' %(self.command, self.partitionID, self.disp_addr)) # acknowledge command
+                        
                         self.react() # holds reactions to the DAQ commands
+                        
                     else:
                         logger.error('Command=%s could not be identified' % self.cmd)
                 elif self.command in self.commands and CH_head_reciever.status.value >=0:
-                    if self.command == 'SoR' and self.scan_status == 'RUNNING' and self.SoR_rec:
-                        self.special_header['frameTime'] = 0xFF005C01
-                        self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
-                        self.ch_com.send_done('SoR',self.partitionID, self.status)
-                        self.SoR_rec = False
+                    if self.command == 'SoR' and self.SoR_rec: 
+                        self.scan_status = self.join_scan_thread(0.001) # TODO: self.join_scan_thread only defined after start of scan, bad practice?
+                        if self.scan_status == 'RUNNING' :
+                            self.special_header['frameTime'] = 0xFF005C01
+                            self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
+                            self.ch_com.send_done('SoR',self.partitionID, self.status)
+                            self.SoR_rec = False
                     elif self.command == 'EoR' and self.EoR_rec:
                         if self.scan_status == 'FINISHED' or self.scan_status == 'ABORTED' or self.scan_status == 'STOPPED':
                             self.special_header['frameTime'] = 0xFF005C02
@@ -144,7 +149,6 @@ class RunControl(object):
                             self.ch_com.send_done('EoR',self.partitionID, self.status)
                         self.EoR_rec = False
                     elif self.converter.all_workers_finished.wait(0.01) and self.SoS_rec: # can not check for command = SoS because SoS done msg can only be sent after EoS (SoS is "done" after buffering last event. This is triggered bei EoS signal.)
-                        print self.command
                         self.ch_com.send_done('SoS',self.partitionID, self.status) # TODO: make sure send done is called after last trigger is read out
                         self.SoS_rec = False
                     elif self.command == 'EoS' and self.converter.EoS_data_flag.wait(0.01) and self.EoS_rec:
@@ -240,15 +244,17 @@ class RunControl(object):
             with multiprocessing.Lock():
                 self.converter.run_number.value = self.run_number
             #start pybar trigger scan
-            self.join_scan_thread = self.mngr.run_run(ThresholdScan, use_thread=True, catch_exception=False)
-            self.scan_status = self.join_scan_thread(0.01)
+#             self.join_scan_thread = self.mngr.run_run(ThresholdScan, use_thread=True, catch_exception=False)
             
-#                                 self.join_scan_thread = runmngr.run_run(ExtTriggerScanSHiP, run_conf={'scan_timeout': 86400, 'max_triggers':0, 
-#                                                                                             'no_data_timeout':0, 'ship_run_number': run_number}, 
-#                                                                                             use_thread=True) # TODO: how start pyBAR in thread?
-#                                 transfer_file('/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/98_module_0_ext_trigger_scan_s_hi_p.h5',#'/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/96_module_0_ext_trigger_scan.h5',
-#                                                self.converter_socket_addr[:-4] + ports[0])
-#             if self.scan_status == 'RUNNING':
+            
+#             self.join_scan_thread = self.mngr.run_run(Fei4SelfTriggerScan, run_conf={'scan_timeout': 86400,# 'max_triggers':0, 
+#                                                                         'trig_count':self.bcids, 'no_data_timeout':0,}, # 'ship_run_number': self.run_number
+#                                                                         use_thread=True)
+#             self.scan_status = self.join_scan_thread(0.01)
+            transfer_file('/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/98_module_0_ext_trigger_scan_s_hi_p.h5',#'/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/96_module_0_ext_trigger_scan.h5',
+                           self.converter_socket_addr[:-4] + ports[0])
+            logger.info('Scan started, status = %s' % self.scan_status)
+#             if self.scan_status == 'RUNNING': 
 #                 self.ch_com.send_done('SoR',self.partitionID, self.status)
         elif self.command == 'EoR': # stop existing pyBAR ExtTriggerScanShiP
             self.EoR_rec = True
@@ -257,7 +263,7 @@ class RunControl(object):
                 self.mngr.current_run.stop(msg='ExtTriggerScanSHiP')
                 self.scan_status = self.join_scan_thread() # TODO: join after current_run.stop ?
             else:
-                logger.error('Recieved EoR command, but no ExtTriggerScanSHiP running')
+                logger.error('Recieved EoR command, but no ExtTriggerScanSHiP running. Last scan status : %s' % self.scan_status)
             if self.converter.is_alive():
                 self.converter.EoR_flag.set()
                 self.converter.reset(cycleID = self.cycle_ID(), msg='EoR command, resetting DataConverter') # reset interpreter and event counter
@@ -277,8 +283,8 @@ class RunControl(object):
             self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
         elif self.command == 'EoS': # trigger EoS header, sent after last event
             self.EoS_rec = True
-            logger.info('recieved EoS, local cycleID:%s' % self.cycle_ID())
             self.converter.EoS_flag.set()
+            logger.info('Set EoS flag, local cycleID:%s' % self.cycle_ID())
         elif self.command == 'Stop':
             logger.info('Recieved Stop! Leaving loop, aborting all functions')
             self._stop = True
