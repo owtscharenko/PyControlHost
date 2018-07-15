@@ -542,8 +542,11 @@ class DataConverter(multiprocessing.Process):
         #                             print index, indices[i+1]
         #                             print event 
                                     channelID = np.bitwise_or(event['row']<<7,event['column'],order='C',dtype='uint16')
-                                    hit_data = np.bitwise_or(np.bitwise_or(event['tot']<<4,event['moduleID'])<<8,
-                                                             np.bitwise_or(0<<4,event['relative_BCID']),order='C',dtype='uint16')
+#                                     hit_data = _build_hit_data(event)
+                                    first_word = np.bitwise_or(event['tot']<<4,event['moduleID'],dtype=np.uint16)
+                                    second_word = np.bitwise_or(0<<4,event['relative_BCID'],dtype=np.uint16)
+                                    hit_data = np.bitwise_or(first_word<<8,second_word, order = 'C', dtype= np.uint16)
+#                                     hit_data = np.bitwise_or(np.bitwise_or(event['tot']<<4,event['moduleID'])<<8 , np.bitwise_or(0<<4,event['relative_BCID']),order = 'C') # ,dtype=np.uint16
                                     self.ch_hit_data = np.empty(channelID.shape[0], dtype = Hit)
                                     self.ch_hit_data["channelID"] = channelID
                                     self.ch_hit_data["hit_data"] = hit_data
