@@ -11,6 +11,7 @@ import multiprocessing, threading
 import time
 import logging
 from ctypes import c_ushort, c_int, c_char_p
+import tables as tb
 
 from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
 from pybar_fei4_interpreter.data_histograming import PyDataHistograming
@@ -142,12 +143,18 @@ def build_data(cycleID, partitionID, event_numbers, multimodule_hits, hit_data_d
 
 
 @njit
+def _build_hit_data(event):
+    first_word = np.bitwise_or(event['tot']<<4,event['moduleID'])
+    second_word = np.bitwise_or(0<<4,event['relative_BCID'])
+    return np.bitwise_or(first_word<<8,second_word)
+
+@njit
 def _new_event(event_number_1, event_number_2):
     'Detect a new event by checking if the event number of the actual hit is the actual event number'
     return event_number_1 != event_number_2
    
         
-@njit  
+@njit
 def merge_hits_tables(h1, h2, h3, h4, h5, h6, h7, h8, result):
     min_event_1 = h1["event_number"].min()
     min_event_2 = h2["event_number"].min()
@@ -205,6 +212,24 @@ def merge_hits_tables(h1, h2, h3, h4, h5, h6, h7, h8, result):
             result[i] = h8[i8]
             i += 1
             i8 += 1
+
+
+class Header_table(tb.IsDescription):
+    event_number = tb.Int64Col(pos=0)    
+    size = tb.UInt16Col(pos=1)
+    partID = tb.UInt16Col(pos=2)
+    cycleID = tb.Int32Col(pos=3)
+    frameTime = tb.Int32Col(pos=4)
+    timeExtent = tb.UInt16Col(pos=5)
+    flags = tb.UInt16Col(pos=6)
+
+    
+
+class SHiP_data_table(tb.IsDescription):
+#     event_number = tb.Int64Col(pos=0)
+    channelID = tb.UInt16Col(pos=1)
+    hit_data = tb.UInt16Col(pos=2)
+
 
 
 class DataConverter(multiprocessing.Process):
@@ -500,9 +525,15 @@ class DataConverter(multiprocessing.Process):
                             print "time for sorting:", datetime.datetime.now() - start
                             n_events = indices.shape[0]
                             print "nevents = %s , nhits = %s" %(n_events, nhits)
-                            with open("./RUN_%03d/%s.txt" % (self.run_number.value, self.file_date), 'a+') as spill_file: # TODO: bad practice. File name should be created in SoS rese, which does not work so far...
-                                self.logger.info('opening run file %s' % spill_file)
-                                
+                            
+#                             dtype_header = [('event_number',np.int64),('size',np.uint16),('partID',np.uint16),('cycleID',np.int32)]
+                            
+                            with tb.open_file('./RUN_%03d/partition_%s_run_%03d.h5' % (self.run_number.value, hex(self.partitionID), self.run_number.value), mode='a', title="SHiP_raw_data") as run_file:
+#                             with open("./RUN_%03d/%s.txt" % (self.run_number.value, self.file_date), 'a+') as spill_file: # TODO: bad practice. File name should be created in SoS reset, which does not work so far...
+                                self.logger.info('opening run file %s' % run_file)
+                                spill_group = run_file.create_group(where = "/",name = 'Spill_%s' % self.file_date, title = 'Spill_%s' % self.file_date, filters = tb.Filters(complib='blosc', complevel=5, fletcher32=False))
+                                header_table = run_file.create_table(where = spill_group, name = 'Headers', description = Header_table, title = 'Headers to event data')
+                                hit_table = run_file.create_table(where = spill_group, name = 'Hits', description = SHiP_data_table, title = 'Hits')
                                 for i, index in enumerate(indices):
                                     if i == n_events-1:
                                         event = self.multimodule_hits[index:]
@@ -525,8 +556,25 @@ class DataConverter(multiprocessing.Process):
                                     self.data_header['timeExtent'] = 15
                                     self.data_header['flags'] = 0
                                     self.ch.send_data(self.RAW_data_tag, self.data_header, self.ch_hit_data)
-                                    np.savetxt(spill_file, self.data_header) #self.data_header)
-                                    np.savetxt(spill_file, self.ch_hit_data)# self.ch_hit_data)
+                                    
+                                    # write header to .h5 file
+                                    header_table.row['event_number'] = event[0]["event_number"]
+                                    header_table.row['size'] = self.data_header['size']
+                                    header_table.row['partID'] = self.data_header['partID']
+                                    header_table.row['cycleID'] = self.data_header['cycleID']
+                                    header_table.row['frameTime'] = self.data_header['frameTime']
+                                    header_table.row['timeExtent'] = self.data_header['timeExtent']
+                                    header_table.row['flags'] = self.data_header['flags']
+                                    header_table.row.append()
+#                                     header_table.append(self.data_header)
+                                    
+                                    # write hits to .h5 file
+                                    hit_table.append(self.ch_hit_data)
+#                                     np.savetxt(spill_file, self.data_header) #self.data_header)
+#                                     np.savetxt(spill_file, self.ch_hit_data)# self.ch_hit_data)
+                                print "time to end of for loop:%s" % (datetime.datetime.now()-start)
+                                header_table.flush()
+                                hit_table.flush()
                             self.EoS_data_flag.set()
                             print "time needed for %s events : %s with saving" %(self.multimodule_hits['event_number'][-1],(datetime.datetime.now()-start))
 #                     self.total_events += event_indices.shape[0]
