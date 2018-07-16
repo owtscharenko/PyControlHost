@@ -226,7 +226,7 @@ class Header_table(tb.IsDescription):
     
 
 class SHiP_data_table(tb.IsDescription):
-#     event_number = tb.Int64Col(pos=0)
+    event_number = tb.Int64Col(pos=0)
     channelID = tb.UInt16Col(pos=1)
     hit_data = tb.UInt16Col(pos=2)
 
@@ -525,32 +525,36 @@ class DataConverter(multiprocessing.Process):
                             print "time for sorting:", datetime.datetime.now() - start
                             n_events = indices.shape[0]
                             print "nevents = %s , nhits = %s" %(n_events, nhits)
-                            
-#                             dtype_header = [('event_number',np.int64),('size',np.uint16),('partID',np.uint16),('cycleID',np.int32)]
+    
+                            headers = np.empty(shape = (n_events,), dtype = [('event_number', np.int64), ('size',np.uint16), ('partID', np.uint16), ('cycleID', np.int32), ('frameTime', np.int32), ('timeExtent', np.uint16), ('flags', np.uint16)])
+                            hits = np.empty(shape = (nhits,), dtype = [('event_number', np.int64),('channelID', np.uint16),('hit_data', np.uint16)])
                             
                             with tb.open_file('./RUN_%03d/partition_%s_run_%03d.h5' % (self.run_number.value, hex(self.partitionID), self.run_number.value), mode='a', title="SHiP_raw_data") as run_file:
-#                             with open("./RUN_%03d/%s.txt" % (self.run_number.value, self.file_date), 'a+') as spill_file: # TODO: bad practice. File name should be created in SoS reset, which does not work so far...
-                                self.logger.info('opening run file %s' % run_file)
+                                
+                                self.logger.info('opening run file %s' % run_file.filename)
                                 spill_group = run_file.create_group(where = "/",name = 'Spill_%s' % self.file_date, title = 'Spill_%s' % self.file_date, filters = tb.Filters(complib='blosc', complevel=5, fletcher32=False))
                                 header_table = run_file.create_table(where = spill_group, name = 'Headers', description = Header_table, title = 'Headers to event data')
                                 hit_table = run_file.create_table(where = spill_group, name = 'Hits', description = SHiP_data_table, title = 'Hits')
+                                
                                 for i, index in enumerate(indices):
                                     if i == n_events-1:
                                         event = self.multimodule_hits[index:]
                                     else:
                                         event = self.multimodule_hits[index:indices[i+1]]
-        #                             print index, indices[i+1]
-        #                             print event 
+                                    
+                                    # build SHiP data format
                                     channelID = np.bitwise_or(event['row']<<7,event['column'],order='C',dtype='uint16')
 #                                     hit_data = _build_hit_data(event)
                                     first_word = np.bitwise_or(event['tot']<<4,event['moduleID'],dtype=np.uint16)
                                     second_word = np.bitwise_or(0<<4,event['relative_BCID'],dtype=np.uint16)
                                     hit_data = np.bitwise_or(first_word<<8,second_word, order = 'C', dtype= np.uint16)
 #                                     hit_data = np.bitwise_or(np.bitwise_or(event['tot']<<4,event['moduleID'])<<8 , np.bitwise_or(0<<4,event['relative_BCID']),order = 'C') # ,dtype=np.uint16
+                                    #fill numpy array with SHiP data
                                     self.ch_hit_data = np.empty(channelID.shape[0], dtype = Hit)
                                     self.ch_hit_data["channelID"] = channelID
                                     self.ch_hit_data["hit_data"] = hit_data
-                                    # each event needs a frame header
+                                    
+                                    # each event needs a frame header, extra array for header
                                     self.data_header = np.empty(shape=(1,), dtype= FrHeader)
                                     self.data_header['size'] = channelID.nbytes + 16
                                     self.data_header['partID'] = self.partitionID
@@ -560,22 +564,29 @@ class DataConverter(multiprocessing.Process):
                                     self.data_header['flags'] = 0
                                     self.ch.send_data(self.RAW_data_tag, self.data_header, self.ch_hit_data)
                                     
-                                    # write header to .h5 file
-                                    header_table.row['event_number'] = event[0]["event_number"]
-                                    header_table.row['size'] = self.data_header['size']
-                                    header_table.row['partID'] = self.data_header['partID']
-                                    header_table.row['cycleID'] = self.data_header['cycleID']
-                                    header_table.row['frameTime'] = self.data_header['frameTime']
-                                    header_table.row['timeExtent'] = self.data_header['timeExtent']
-                                    header_table.row['flags'] = self.data_header['flags']
-                                    header_table.row.append()
-#                                     header_table.append(self.data_header)
+                                    # write hits to numpy array for local storage
+                                    if i == n_events-1:
+                                        hits[index:]['event_number'] = event['event_number']
+                                        hits[index:]['channelID'] = self.ch_hit_data['channelID']
+                                        hits[index:]['hit_data'] = self.ch_hit_data['hit_data']
+                                    else:
+                                        hits[index:indices[i+1]]['event_number'] = event['event_number']
+                                        hits[index:indices[i+1]]['channelID'] = self.ch_hit_data['channelID']
+                                        hits[index:indices[i+1]]['hit_data'] = self.ch_hit_data['hit_data']
                                     
-                                    # write hits to .h5 file
-                                    hit_table.append(self.ch_hit_data)
-#                                     np.savetxt(spill_file, self.data_header) #self.data_header)
-#                                     np.savetxt(spill_file, self.ch_hit_data)# self.ch_hit_data)
+                                    # write header to numpy array for local storage
+                                    headers[i]['event_number'] = event[0]["event_number"]
+                                    headers[i]['size'] = self.data_header['size']
+                                    headers[i]['partID'] = self.data_header['partID']
+                                    headers[i]['cycleID'] = self.data_header['cycleID']
+                                    headers[i]['frameTime'] = self.data_header['frameTime']
+                                    headers[i]['timeExtent'] = self.data_header['timeExtent']
+                                    headers[i]['flags'] = self.data_header['flags']
+
                                 print "time to end of for loop:%s" % (datetime.datetime.now()-start)
+                                # save numpy arrays in .h5 file
+                                hit_table.append(hits)
+                                header_table.append(headers)
                                 header_table.flush()
                                 hit_table.flush()
                             self.EoS_data_flag.set()
