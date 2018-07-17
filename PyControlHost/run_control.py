@@ -99,9 +99,9 @@ class RunControl(object):
         self.mngr = RunManager(self.pybar_conf)
         self.join_scan_thread = None
         recv_end, send_end = multiprocessing.Pipe(False)
-        CH_head_reciever = CHostReceiveHeader(send_end)
-        CH_head_reciever.name = 'CHostHeadReciever'
-        CH_head_reciever.Daemon = True
+        self.CH_head_reciever = CHostReceiveHeader(send_end)
+        self.CH_head_reciever.name = 'CHostHeadReciever'
+        self.CH_head_reciever.Daemon = True
         
         
         while True:
@@ -111,8 +111,8 @@ class RunControl(object):
     #                     self.status = ch.get_head_wait('DAQCMD', self.ch_com.cmdsize)
     #                     if self.status >=0 and self.ch_com.status >=0 :
     #                         self.cmd = self.ch_com.get_cmd() # recieved command contains command word [0] and additional info [1]... different for each case
-                if not CH_head_reciever.is_alive():
-                    CH_head_reciever.start() # TODO: CH receiver does not terminate upon 2 x ctrl+c
+                if not self.CH_head_reciever.is_alive():
+                    self.CH_head_reciever.start() # TODO: CH receiver does not terminate upon 2 x ctrl+c
                 if not self.converter.is_alive() and self.converter_started:
                     logging.error('\n\n\n         DataConverter was started but is not alive anymore \n\n')
                     self.converter_started = False
@@ -130,9 +130,9 @@ class RunControl(object):
                         
                     else:
                         logger.error('Command=%s could not be identified' % self.cmd)
-                elif self.command in self.commands and CH_head_reciever.status.value >=0:
+                elif self.command in self.commands and self.CH_head_reciever.status.value >=0:
                     if self.command == 'SoR' and self.SoR_rec: 
-                        self.scan_status = self.join_scan_thread(0.001) # TODO: self.join_scan_thread only defined after start of scan, bad practice?
+#                         self.scan_status = self.join_scan_thread(0.001) # TODO: self.join_scan_thread only defined after start of scan, bad practice?
                         if self.scan_status == 'RUNNING' :
                             self.special_header['frameTime'] = 0xFF005C01
                             self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
@@ -157,7 +157,7 @@ class RunControl(object):
                         self.ch_com.send_done('EoS', self.partitionID, self.status)
                         self.converter.EoS_reset() # TODO: bad practice, reset should not be here but in react method
                         self.EoS_rec = False
-                elif CH_head_reciever.status.value < 0 :
+                elif self.CH_head_reciever.status.value < 0 :
                     logger.error('Header could not be recieved')
                 elif self._stop == True:
                     break
@@ -165,16 +165,19 @@ class RunControl(object):
                     continue
             except RuntimeWarning:
                 if self.converter_started == False:
+                    print "DataConverter alive? ", self.converter.is_alive()
+                    self.converter.stop()
                     logger.info('Restarting DataConverter.')
-                    self.converter.start()
-                    self.converter_started = True
+                    if not self.converter.is_alive():
+                        self.converter.start()
+                        self.converter_started = True
                     continue
                 else:
                     break
         self.scan_status = self.join_scan_thread(0.01)
         logger.info('scan status : %s' % self.scan_status)
         if self._stop == True:    
-            CH_head_reciever.stop()
+            self.CH_head_reciever.stop()
             self.converter.stop()
             self.join_scan_thread(timeout = 0.01)
             self.mngr.abort()
@@ -238,7 +241,7 @@ class RunControl(object):
                 self.converter.start()
                 self.converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
                 self.converter_started = True
-            else: 
+            else:
                 self.converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
             self.converter.SoR_flag.set()
             with multiprocessing.Lock():

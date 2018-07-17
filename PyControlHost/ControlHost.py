@@ -1,5 +1,5 @@
 import logging
-from ctypes import Structure, c_ushort, c_int
+from ctypes import Structure, c_ushort, c_int, c_uint
 import numpy as np
 import control_host_coms as ch
 import multiprocessing
@@ -9,8 +9,8 @@ import signal
 class FrHeader(Structure):
     _fields_=[("size",   c_ushort),
               ("partID", c_ushort),
-              ("cycleID",c_int),
-              ("frameTime", c_int),
+              ("cycleID",c_uint),
+              ("frameTime", c_uint),
               ("timeExtent", c_ushort),
               ("flags",  c_ushort)]
    
