@@ -31,11 +31,10 @@ class CHostReceiveHeader(multiprocessing.Process):
         self.status = multiprocessing.Value('i',0)
         self.head_received = multiprocessing.Event()
         self.send_end = send_end
-    
-    def _signal_handler(self, signum, frame):
-        signal.signal(signal.SIGINT, signal.SIG_DFL)
+
     
     def run(self): # TODO: is not killed by ctrl+c in main loop
+        
         while not self._stop_readout.wait(0.01):
             self.status.value = ch.get_head_wait('DAQCMD', self.cmdsize)
             if self.status.value >=0:

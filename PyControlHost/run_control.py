@@ -101,7 +101,7 @@ class RunControl(object):
         recv_end, send_end = multiprocessing.Pipe(False)
         self.CH_head_reciever = CHostReceiveHeader(send_end)
         self.CH_head_reciever.name = 'CHostHeadReciever'
-        self.CH_head_reciever.Daemon = True
+        self.CH_head_reciever.daemon = True
         
         
         while True:
@@ -119,10 +119,10 @@ class RunControl(object):
                     raise RuntimeWarning
                 if recv_end.poll(): # look whether there is a command in pipe
                     self.cmd = recv_end.recv()
-                    if len(self.cmd) > 1:
-                        self.command = self.cmd[0]
-                    elif len(self.cmd)==0 or len(self.cmd) ==1 :
-                        self.command = self.cmd
+#                     if len(self.cmd) > 1:
+#                         self.command = self.cmd[0]
+#                     elif len(self.cmd)==0 or len(self.cmd) ==1 :
+                    self.command = self.cmd[0]
                     if self.command in self.commands and self.ch_com.status >=0:
                         self.ch_com.send_ack(tag='DAQACK',msg = '%s %04X %s' %(self.command, self.partitionID, self.disp_addr)) # acknowledge command
                         
@@ -159,7 +159,7 @@ class RunControl(object):
                         self.EoS_rec = False
                 elif self.CH_head_reciever.status.value < 0 :
                     logger.error('Header could not be recieved')
-                elif self._stop == True:
+                if self._stop == True:
                     break
                 else:
                     continue
@@ -170,17 +170,19 @@ class RunControl(object):
                     logger.info('Restarting DataConverter.')
                     if not self.converter.is_alive():
                         self.converter.start()
-                        self.converter_started = True
+                        if self.converter.is_alive():
+                            self.converter_started = True
                     continue
                 else:
                     break
-        self.scan_status = self.join_scan_thread(0.01)
-        logger.info('scan status : %s' % self.scan_status)
+#         self.scan_status = self.join_scan_thread(0.01)
+#         logger.info('scan status : %s' % self.scan_status)
         if self._stop == True:    
             self.CH_head_reciever.stop()
             self.converter.stop()
-            self.join_scan_thread(timeout = 0.01)
-            self.mngr.abort()
+            if self.scan_status:
+                self.join_scan_thread(timeout = 0.01)
+                self.mngr.current_run.abort()
         logger.error('Loop exited')
         
 #             
