@@ -342,6 +342,8 @@ class DataConverter(multiprocessing.Process):
             
             for worker_flag in self.worker_finished_flags:
                 worker_flag.clear()
+            for flag in self.send_data_flag:
+                flag.clear()
             self.all_workers_finished.clear()
             self.SoR_flag.clear()
             self.EoR_flag.clear()
@@ -378,6 +380,8 @@ class DataConverter(multiprocessing.Process):
             for flag in self.worker_finished_flags:
                 flag.clear()
             for flag in self.worker_reset_finished:
+                flag.clear()
+            for flag in self.send_data_flag:
                 flag.clear()
             self.arrays_read_flag.clear()
             self.EoS_flag.clear()
@@ -507,12 +511,14 @@ class DataConverter(multiprocessing.Process):
                 with self.reset_lock:
                     start = datetime.datetime.now()
                     if not self.EoS_data_flag.is_set(): # EoS_data_flag is set after all events are sent to dispatcher
-                        for flag in self.worker_finished_flags: # wait for all workers to finish, this also triggers the SoS DONE message in run_control
-                            if flag.is_set():
-                                self.all_workers_finished.set()
-                            else:
-                                self.all_workers_finished.clear()
-                        if self.all_workers_finished.is_set():
+#                         if all(flag.is_set() for flag in self.worker_finished_flags):
+#                             self.all_workers_finished.set()
+#                         while not all(flag.is_set() for flag in self.worker_finished_flags):
+#                             continue
+#                         if self.all_workers_finished.is_set():                        
+
+                        if all(pipe.poll() for pipe in self.pipes):
+#                         if all(flag.is_set() for flag in self.send_data_flag):
                             for i, pipe in enumerate(self.pipes):
                                 hit_arrays[i] = pipe.recv().copy()
                             self.logger.info('All workers finished, starting conversion')
