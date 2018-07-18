@@ -149,7 +149,7 @@ class RunControl(object):
                             self.ch_com.send_done('EoR',self.partitionID, self.status)
                         self.EoR_rec = False
                     elif self.converter.all_workers_finished.wait(0.01) and self.SoS_rec: # can not check for command = SoS because SoS done msg can only be sent after EoS (SoS is "done" after buffering last event. This is triggered bei EoS signal.)
-                        self.ch_com.send_done('SoS',self.partitionID, self.status) # TODO: make sure send done is called after last trigger is read out
+                        self.ch_com.send_done('SoS',self.partitionID, self.status) # send done is called after last trigger is read out
                         self.SoS_rec = False
                     elif self.command == 'EoS' and self.converter.EoS_data_flag.wait(0.01) and self.EoS_rec:
                         self.special_header['frameTime'] = 0xFF005C04
@@ -252,18 +252,18 @@ class RunControl(object):
 #             self.join_scan_thread = self.mngr.run_run(ThresholdScan, use_thread=True, catch_exception=False)
             
             
-#             self.join_scan_thread = self.mngr.run_run(Fei4SelfTriggerScan, run_conf={'scan_timeout': 86400,# 'max_triggers':0, 
-#                                                                         'trig_count':self.bcids, 'no_data_timeout':0,}, # 'ship_run_number': self.run_number
-#                                                                         use_thread=True)
+            self.join_scan_thread = self.mngr.run_run(ExtTriggerScanSHiP, run_conf={'scan_timeout': 86400,# 'max_triggers':0, 
+                                                                        'trig_count':self.bcids, 'no_data_timeout':0, 'ship_run_number': self.run_number},
+                                                                        use_thread=True)
 #             self.scan_status = self.join_scan_thread(0.01)
-            transfer_file('/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/98_module_0_ext_trigger_scan_s_hi_p.h5',#'/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/96_module_0_ext_trigger_scan.h5',
-                           self.converter_socket_addr[:-4] + ports[0])
+#             transfer_file('/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/98_module_0_ext_trigger_scan_s_hi_p.h5',#'/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/96_module_0_ext_trigger_scan.h5',
+#                            self.converter_socket_addr[:-4] + ports[0])
             logger.info('Scan started, status = %s' % self.scan_status)
-#             if self.scan_status == 'RUNNING': 
-#                 self.ch_com.send_done('SoR',self.partitionID, self.status)
+            if self.scan_status == 'RUNNING': 
+                self.ch_com.send_done('SoR',self.partitionID, self.status)
         elif self.command == 'EoR': # stop existing pyBAR ExtTriggerScanShiP
             self.EoR_rec = True
-            if self.mngr.current_run.__class__.__name__ == 'ThresholdScan':
+            if self.mngr.current_run.__class__.__name__ == 'ExtTriggerScanSHiP':
 #                 self.join_scan_thread(timeout = 0.01)
                 self.mngr.current_run.stop(msg='ExtTriggerScanSHiP')
                 self.scan_status = self.join_scan_thread() # TODO: join after current_run.stop ?
@@ -280,10 +280,12 @@ class RunControl(object):
             if len(self.cmd) > 1:
                 cycleID = np.uint64(self.cmd[1])
             else:
-                cycleID = self.cycle_ID() # create own cycleID if SoS command does not provide
+                cycleID = self.cycle_ID() # create own cycleID if SoS command does not provide one
             self.converter.cycle_ID.value = cycleID
             logger.info('Recieved SoS header, cycleID = %s' % cycleID)
             self.converter.SoS_reset()
+#             transfer_file('/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/98_module_0_ext_trigger_scan_s_hi_p.h5',#'/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/96_module_0_ext_trigger_scan.h5',
+#                            self.converter_socket_addr[:-4] + ports[0])
             self.special_header['frameTime'] = 0xFF005C03
             self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
         elif self.command == 'EoS': # trigger EoS header, sent after last event

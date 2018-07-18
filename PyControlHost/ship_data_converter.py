@@ -4,7 +4,6 @@ import zmq
 import numpy as np
 import datetime
 from numba import njit
-import numba
 import cProfile
 import cython
 import multiprocessing
@@ -15,12 +14,7 @@ from ctypes import c_ushort, c_int, c_char_p
 import tables as tb
 
 from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
-from pybar_fei4_interpreter.data_histograming import PyDataHistograming
-from pybar_fei4_interpreter.data_struct import HitInfoTable
-# import run_control.RunControl as RunControl
 from  ControlHost import CHostInterface, FrHeader, Hit
-from control_host_coms import build_and_send_data
-
 
 
 
@@ -272,14 +266,12 @@ class DataConverter(multiprocessing.Process):
         self.worker_reset_flag = multiprocessing.Event()
         self.worker_finished_flags= [multiprocessing.Event() for _ in range(self.n_modules)]
         self.worker_reset_finished = [multiprocessing.Event() for _ in range(self.n_modules)]
+        self.send_data_flag = [multiprocessing.Event() for _ in range(self.n_modules)]
         self.arrays_read_flag = multiprocessing.Event()
         self.all_workers_finished = multiprocessing.Event()
-        self.reset_lock = multiprocessing.Lock() 
-        
-        self.raw_data_queue = multiprocessing.Queue()
-        
-#         self.setup_raw_data_analysis()
-        
+        self.reset_lock = multiprocessing.Lock()
+         
+#         self.raw_data_queue = multiprocessing.Queue()
         self.kill_received = False
         self.ch = CHostInterface()
         self.total_events = 0
@@ -289,7 +281,9 @@ class DataConverter(multiprocessing.Process):
         self.run_number = multiprocessing.Value('i',0)
         self.spill_file_name = './default.h5'
         self.partitionID = partitionID # '0X0802' from 0800 to 0802 
-        if disp_addr: # in case of direct call of DataConverter, the partitionID is handed over as hex TODO: fix this behavior
+        
+        # in case of direct call of DataConverter, the partitionID is handed over as hex TODO: fix this behavior
+        if disp_addr: 
             self.DetName = 'Pixels' + partitionID[4:] + '_LocDaq_0' + partitionID[2:]
             self.RAW_data_tag = 'RAW_0' + partitionID[2:]
         else: 
@@ -314,7 +308,6 @@ class DataConverter(multiprocessing.Process):
     def setup_raw_data_analysis(self):
         self.interpreters = []
         self.hits = []
-        self.recv_hits = []
         for _ in range(self.n_modules):
             interpreter = PyDataInterpreter()
             interpreter.create_empty_event_hits(True)
@@ -324,7 +317,6 @@ class DataConverter(multiprocessing.Process):
             interpreter.set_FEI4B(True)
             self.interpreters.append(interpreter)
             self.hits.append(np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C')))
-#             self.recv_hits.append(np.ascontiguousarray(np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C')))
 
     def connect(self, socket_addr):
         self.socket_addr = socket_addr
@@ -416,7 +408,7 @@ class DataConverter(multiprocessing.Process):
         
         context = zmq.Context()
         socket_pull = context.socket(zmq.PULL)  # subscriber
-#         socket_pull.setsockopt(zmq.SUBSCRIBE, '')  # do not filter any data
+#         socket_pull.setsockopt(zmq.SUBSCRIBE, '')  # do not filter any data needed for PUB/SUB but not for PUSH/PULL
         socket_pull.bind(socket_addr)
         self.logger.info("Worker %s started, socket %s" % (moduleID, socket_addr))
         hit_array = np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C')
@@ -429,67 +421,64 @@ class DataConverter(multiprocessing.Process):
         interpreter.set_FEI4B(True)
         
         while not self._stop_readout.wait(0.01) :  # use wait(), do not block here
-#             with self.reset_lock:
-                if self.worker_reset_flag.is_set() and not self.worker_reset_finished[moduleID].is_set():
-                    with self.reset_lock:
-                        interpreter.reset()
-                        self.logger.info("Resetting worker %s" % (moduleID))
-                        self.worker_reset_finished[moduleID].set()
-                if self.EoS_flag.is_set() and not self.worker_finished_flags[moduleID].is_set() : # EoS_flag is set in run_control after reception of EoS command 
-                    # store remaining buffered event in the interpreter at the EoS
-    #                 interpreter.store_event()
-    #                 hits = interpreter.get_hits()
-    #                 module_hits = np.empty(shape=(hits.shape[0],),dtype = self.multi_chip_event_dtype, order = 'C')
-    #                 module_hits['event_number'] = hits['event_number']
-    #                 module_hits['trigger_number'] = hits['trigger_number']
-    #                 module_hits['trigger_time_stamp'] = hits['trigger_time_stamp']
-    #                 module_hits['relative_BCID'] = hits['relative_BCID']
-    #                 module_hits['column'] = hits['column']
-    #                 module_hits['row'] = hits['row']
-    #                 module_hits['tot'] = hits['tot']
-    #                 module_hits['moduleID'] = moduleID
-    #                 hit_array = np.r_[hit_array,module_hits]
-                    
-                    send_array = hit_array.copy()
-                    send_end.send(send_array) # TODO: last event is not sent
-                    self.worker_finished_flags[moduleID].set()
-                    self.logger.info("Worker %s finished, received %s hits" % (moduleID , hit_array.shape))
-                    hit_array = np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C')
-    #                 self.interpreters[moduleID].reset()
-    
-                try:
-                    meta_data = socket_pull.recv_json(flags=zmq.NOBLOCK)
-                except zmq.Again:
-                    pass
-                else:
-                    name = meta_data.pop('name')
-                    if name == 'ReadoutData':
-                        data = socket_pull.recv()
-                        # reconstruct numpy array
-                        buf = buffer(data)
-                        dtype = meta_data.pop('dtype')
-                        shape = meta_data.pop('shape')
-                        data_array = np.frombuffer(buf, dtype=dtype).reshape(shape)
-                        
-                        interpreter.interpret_raw_data(data_array)
-    #                     self.analyze_raw_data(raw_data=np.ascontiguousarray(data_array), module=moduleID)
-                        # build new array with moduleID, take only necessary data
-                        hits = interpreter.get_hits()
-    #                     hits = self.interpreters[moduleID].get_hits()
-                        module_hits = np.empty(shape=(hits.shape[0],),dtype = self.multi_chip_event_dtype, order = 'C')
-                        module_hits['event_number'] = hits['event_number']
-                        module_hits['trigger_number'] = hits['trigger_number']
-                        module_hits['trigger_time_stamp'] = hits['trigger_time_stamp']
-                        module_hits['relative_BCID'] = hits['relative_BCID']
-                        module_hits['column'] = hits['column']
-                        module_hits['row'] = hits['row']
-                        module_hits['tot'] = hits['tot']
-                        module_hits['moduleID'] = moduleID
-                        # append chunk to hit array
-                        hit_array = np.r_[hit_array,module_hits]
-                    
+            if self.worker_reset_flag.is_set() and not self.worker_reset_finished[moduleID].is_set():
+                with self.reset_lock:
+                    interpreter.reset()
+                    self.logger.info("Resetting worker %s" % (moduleID))
+                    self.worker_reset_finished[moduleID].set()
+            if self.EoS_flag.is_set() and not self.worker_finished_flags[moduleID].is_set() : # EoS_flag is set in run_control after reception of EoS command 
+                self.send_data_flag[moduleID].set()
+                # store remaining buffered event in the interpreter at EoS
+#                 interpreter.store_event()
+#                 hits = interpreter.get_hits()
+#                 module_hits = np.empty(shape=(hits.shape[0],),dtype = self.multi_chip_event_dtype, order = 'C')
+#                 module_hits['event_number'] = hits['event_number']
+#                 module_hits['trigger_number'] = hits['trigger_number']
+#                 module_hits['trigger_time_stamp'] = hits['trigger_time_stamp']
+#                 module_hits['relative_BCID'] = hits['relative_BCID']
+#                 module_hits['column'] = hits['column']
+#                 module_hits['row'] = hits['row']
+#                 module_hits['tot'] = hits['tot']
+#                 module_hits['moduleID'] = moduleID
+#                 hit_array = np.r_[hit_array,module_hits]
+                
+                send_array = hit_array.copy()
+                send_end.send(send_array) # TODO: last event is not sent
+                self.worker_finished_flags[moduleID].set()
+                self.logger.info("Worker %s finished, received %s hits" % (moduleID , hit_array.shape))
+                hit_array = np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C')
 
-
+            try:
+                meta_data = socket_pull.recv_json(flags=zmq.NOBLOCK)
+            except zmq.Again:
+                pass
+            else:
+                name = meta_data.pop('name')
+                if name == 'ReadoutData':
+                    data = socket_pull.recv()
+                    # reconstruct numpy array
+                    buf = buffer(data)
+                    dtype = meta_data.pop('dtype')
+                    shape = meta_data.pop('shape')
+                    data_array = np.frombuffer(buf, dtype=dtype).reshape(shape)
+                    
+                    interpreter.interpret_raw_data(data_array)
+#                     self.analyze_raw_data(raw_data=np.ascontiguousarray(data_array), module=moduleID)
+                    # build new array with moduleID, take only necessary data
+                    hits = interpreter.get_hits()
+#                     hits = self.interpreters[moduleID].get_hits()
+                    module_hits = np.empty(shape=(hits.shape[0],),dtype = self.multi_chip_event_dtype, order = 'C')
+                    module_hits['event_number'] = hits['event_number']
+                    module_hits['trigger_number'] = hits['trigger_number']
+                    module_hits['trigger_time_stamp'] = hits['trigger_time_stamp']
+                    module_hits['relative_BCID'] = hits['relative_BCID']
+                    module_hits['column'] = hits['column']
+                    module_hits['row'] = hits['row']
+                    module_hits['tot'] = hits['tot']
+                    module_hits['moduleID'] = moduleID
+                    # append chunk to hit array
+                    hit_array = np.r_[hit_array,module_hits]
+                    
     
     def run(self):
         ''' create workers upon start and collect data after EoS'''
@@ -509,17 +498,7 @@ class DataConverter(multiprocessing.Process):
             self.jobs.append(worker)
             self.pipes.append(recv_end)
             worker.start()
-            print "PID of worker %s:"% module, worker.pid
-        
-            
-#         for module in range(self.n_modules): # TODO: fast enough? only possible to check with 8 FEs
-#             recv_end, send_end = multiprocessing.Pipe(False)
-#             worker = threading.Thread(target = self._module_worker, args =(self.address + self.ports[module], module, send_end))
-#             worker.name = 'RecieverModule_%s' % module
-#             worker.daemon = True
-#             self.jobs.append(worker)
-#             self.pipes.append(recv_end)
-#             worker.start()
+#             print "PID of worker %s:"% module, worker.pid
         
         while not self._stop_readout.wait(0.01):
 
@@ -559,25 +538,22 @@ class DataConverter(multiprocessing.Process):
                             hits = np.empty(shape = (nhits,), dtype = [('event_number', np.int64),('channelID', np.uint16),('hit_data', np.uint16)])
                             
                             with tb.open_file('./RUN_%03d/partition_%s_run_%03d.h5' % (self.run_number.value, hex(self.partitionID), self.run_number.value), mode='a', title="SHiP_raw_data") as run_file:
-                                name = self.get_file_date(self.get_cycle_ID())
+#                                 name = self.get_file_date(self.get_cycle_ID())
                                 self.logger.info('opening run file %s' % run_file.filename)
-                                spill_group = run_file.create_group(where = "/",name = 'Spill_%s' % name, title = 'Spill_%s' % name, filters = tb.Filters(complib='blosc', complevel=5, fletcher32=False))
+                                spill_group = run_file.create_group(where = "/",name = 'Spill_%s' % self.file_date, title = 'Spill_%s' % self.file_date, filters = tb.Filters(complib='blosc', complevel=5, fletcher32=False))
                                 header_table = run_file.create_table(where = spill_group, name = 'Headers', description = Header_table, title = 'Headers to event data')
                                 hit_table = run_file.create_table(where = spill_group, name = 'Hits', description = SHiP_data_table, title = 'Hits')
-                                print "tables created"
                                 for i, index in enumerate(indices):
                                     if i == n_events-1:
                                         event = multimodule_hits[index:]
                                     else:
                                         event = multimodule_hits[index:indices[i+1]]
-                                    if i == 0 :
-                                        print "event assigned"
                                     # build SHiP data format
                                     channelID = np.bitwise_or(event['row']<<7,event['column'],order='C',dtype=np.uint16)
                                     first_word = np.bitwise_or(event['tot']<<4,event['moduleID'],dtype=np.uint16)
                                     second_word = np.bitwise_or(0<<4,event['relative_BCID'],dtype=np.uint16)
                                     hit_data = np.bitwise_or(first_word<<8,second_word, order = 'C', dtype= np.uint16)
-#                                     hit_data = np.bitwise_or(np.bitwise_or(event['tot']<<4,event['moduleID'])<<8 , np.bitwise_or(0<<4,event['relative_BCID']),order = 'C') # ,dtype=np.uint16
+                                    
                                     #fill numpy array with SHiP data
                                     self.ch_hit_data = np.empty(channelID.shape[0], dtype = Hit)
                                     self.ch_hit_data["channelID"] = channelID
@@ -623,15 +599,16 @@ class DataConverter(multiprocessing.Process):
                             # clear hit arrays for reception of worker data
                             for i in range(self.n_modules):
                                 hit_arrays[i] = 0
+                            self.logger.info('Sent %s events with %s hits' %(n_events, nhits))
                             print "time needed for %s events : %s with saving" %(n_events,(datetime.datetime.now()-start))
                 
                         
     def stop(self):
         self.logger.info('Stopping converter')
         self._stop_readout.set()
-        for job in self.jobs:
-            job.join()
-        self.logger.info('All Workers Joined')
+#         for job in self.jobs:
+#             job.stop()
+#         self.logger.info('All Workers Joined')
 
 
 
