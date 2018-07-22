@@ -335,7 +335,7 @@ class DataConverter(multiprocessing.Process):
             self.n_readout = 0
             self.total_events = 0
             self.logger.info('last cycleID=%s'% self.cycle_ID.value)
-            self.cycle_ID.value = cycleID # TODO: careful with multiprocessing values!
+#             self.cycle_ID.value = cycleID # TODO: careful with multiprocessing values!
             self.run_number.value = 0
             self.spill_file_name = './default.h5'
             self._stop_readout.clear()
@@ -369,8 +369,9 @@ class DataConverter(multiprocessing.Process):
             self.EoS_data_flag.clear()
             self.all_workers_finished.clear()
             self.worker_reset_flag.clear()
-            self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value /5.)).strftime("%Y_%m_%d_%H_%M_%S")
-            self.spill_file_name = "./RUN_%03d/%s.txt" % (self.run_number.value, self.file_date) 
+#             self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value/5.)).strftime("%Y_%m_%d_%H_%M_%S")
+#             print "spill time:", datetime.timedelta(seconds = self.cycle_ID.value/5.).strftime("%Y_%m_%d_%H_%M_%S")
+#             self.spill_file_name = "./RUN_%03d/%s.txt" % (self.run_number.value, self.file_date) 
         self.logger.info('SoS reset finished')
 
     
@@ -536,9 +537,9 @@ class DataConverter(multiprocessing.Process):
                             self.SoS_flag.clear()  
                             
                             event_numbers , indices = np.unique(multimodule_hits['event_number'],return_index = True)
-                            print "time for sorting:", datetime.datetime.now() - start
+                            print 'time for sorting:', datetime.datetime.now() - start
                             n_events = indices.shape[0]
-                            print "nevents = %s , nhits = %s, last event number = %s" %(n_events, nhits, event_numbers[-1])
+                            print 'nevents = %s , nhits = %s, ' %(n_events, nhits) #  last event number = %s" %(n_events, nhits, event_numbers[-1])
     
                             headers = np.empty(shape = (n_events,), dtype = [('event_number', np.int64), ('size',np.uint16), ('partID', np.uint16), ('cycleID', np.uint32), ('frameTime', np.int32), ('timeExtent', np.uint16), ('flags', np.uint16)])
                             hits = np.empty(shape = (nhits,), dtype = [('event_number', np.int64),('channelID', np.uint16),('hit_data', np.uint16)])
