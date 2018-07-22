@@ -519,6 +519,7 @@ class DataConverter(multiprocessing.Process):
 #                         if self.all_workers_finished.is_set():                        
 
                         if all(pipe.poll() for pipe in self.pipes):
+                            self.all_workers_finished.set()
 #                         if all(flag.is_set() for flag in self.send_data_flag):
                             for i, pipe in enumerate(self.pipes):
                                 hit_arrays[i] = pipe.recv().copy()
