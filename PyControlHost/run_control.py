@@ -46,9 +46,13 @@ class RunControl(object):
         self.SoR_rec = False
         self.EoS_rec = False
         self.SoS_rec = False
+        self.Enable_rec = False
+        self.error_printed = False
         self.converter_started = False
+        self.terminated = False
         self.cmd = []
         self.run_number = 0
+        self.cycleID = 0
         self.command = 'none'
         self.scan_status = None
         self.special_header = np.empty(shape=(1,), dtype= FrHeader)
@@ -132,6 +136,10 @@ class RunControl(object):
                     else:
                         logger.error('Command=%s could not be identified' % self.cmd)
                 elif self.command in self.commands and self.CH_head_reciever.status.value >=0:
+                    self.error_printed = False
+                    if self.command =='Enable' and self.Enable_rec:
+                        self.ch_com.send_done('Enable',self.partitionID, self.status)
+                        self.Enable_rec = False
                     if self.command == 'SoR' and self.SoR_rec: 
 #                         self.scan_status = self.join_scan_thread(0.001) # TODO: self.join_scan_thread only defined after start of scan, bad practice?
                         if self.scan_status == 'RUNNING' :
@@ -220,25 +228,26 @@ class RunControl(object):
         
         if self.command == 'Enable': # enable detector partition
             self.enabled = True
-            if not self.converter.is_alive():
-                self.converter.start()
-                self.converter_started = True
-                logger.info('Received Enable, starting DataConverter')
-            else:
-                logger.info('Received Enable.')
+            self.Enable_rec = True
+#             if not self.converter.is_alive():
+#                 self.converter.start()
+#                 self.converter_started = True
+#                 logger.info('Received Enable, starting DataConverter')
+#             else:
+            logger.info('Received Enable.')
         elif self.command == 'Disable': #disable detector partition
             self.enabled = False
-            if self.converter.is_alive():
-                self.converter.stop()
-                logger.info('Received Disable, stopping DataConverter')
-            else:
-                logger.info('Received Disable.')
+    #             if self.converter.is_alive():
+#                 self.converter.stop()
+#                 logger.info('Received Disable, stopping DataConverter')
+#             else:
+            logger.info('Received Disable.')
         elif self.command == 'SoR': # Start new pyBAR ExtTriggerScanShiP.
             self.SoR_rec = True
             if len(self.cmd) > 1 :
                 self.run_number = int(self.cmd[1])
             else:
-                self.run_number = 0
+                self.run_number = 999
             if not os.path.exists("./RUN_%03d/" % self.run_number):
                 os.makedirs("./RUN_%03d/" % self.run_number)
             if not self.converter.is_alive():
