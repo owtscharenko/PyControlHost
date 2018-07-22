@@ -159,10 +159,12 @@ class RunControl(object):
                     elif self.command == 'EoR' and self.EoR_rec:
                         if self.scan_status == 'FINISHED' or self.scan_status == 'ABORTED' or self.scan_status == 'STOPPED':
                             self.special_header['frameTime'] = 0xFF005C02
+                            self.special_header['cycleID'] = self.cycleID
                             self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                             self.ch_com.send_done('EoR',self.partitionID, self.status)
                         elif self.scan_status == 'CRASHED':
                             self.special_header['frameTime'] = 0xFF005C02
+                            self.special_header['cycleID'] = self.cycleID
                             self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                             self.ch_com.send_done('EoR',self.partitionID, self.status)
                         self.EoR_rec = False
@@ -310,6 +312,7 @@ class RunControl(object):
             self.converter.SoS_reset()
 #             transfer_file('/media/silab/data/98_module_0_ext_trigger_scan_s_hi_p.h5',self.converter_socket_addr[:-4] + ports[0])
             self.special_header['frameTime'] = 0xFF005C03
+            self.special_header['cycleID'] = self.cycleID
             self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
         elif self.command == 'EoS': # trigger EoS header, sent after last event
             self.EoS_rec = True
