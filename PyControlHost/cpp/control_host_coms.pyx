@@ -18,6 +18,7 @@ cdef extern from "getdata.c":
     int get_string(char *buf, int lim)
     int my_id(const char *id)
     int send_me_always()
+    void drop_connection()
     
 cdef extern from 'utils.h':
     cdef cppclass DataFrameHeader:
@@ -73,6 +74,9 @@ def rec_cmd():
    
 def rec_data(buf, lim): # makes memcpy to buf of size lim
     return get_data(<void *>buf.data, lim), buf
+
+def drop_ch_connection():
+    return drop_connection()
 
 
 def send_fullstring(const char *tag, const char *string):

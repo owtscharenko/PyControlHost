@@ -48,6 +48,7 @@ class CHostReceiveHeader(multiprocessing.Process):
 
 
     def stop(self):
+        print " stopping head receiver"
         self._stop_readout.set()
 
 
@@ -151,7 +152,9 @@ class CHostInterface():
             self.logger.error('Could not send DAQDONE')
         elif self.status >= 0:
             self.logger.info('DAQDONE sent, msg = %s'% cmd )
-
+            
+    def drop_conn(self):
+        ch.drop_ch_connection()
     
 if __name__ == '__main__':
     pass
