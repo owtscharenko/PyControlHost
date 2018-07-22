@@ -64,7 +64,8 @@ class RunControl(object):
         
     def _signal_handler(self, signum, frame):
         signal.signal(signal.SIGINT, signal.SIG_DFL)  # setting default handler... pressing Ctrl-C a second time will kill application
-    
+        self.disconnect_CH(self.disp_addr)
+        
     
     def cycle_ID(self):
         ''' counts in 0.2s steps from 08. April 2015 '''
@@ -84,6 +85,13 @@ class RunControl(object):
         elif self.ch_com.status >= 0 :
             self.ch_com.send_me_always()
             
+    
+    def disconnect_CH(self, disp_addr):
+        logger.info('Dropping connection to %s' % disp_addr)
+        self.ch_com.drop_conn()
+        self.CH_head_reciever.stop()
+        self._run = False
+        logger.info("setting self._run to False")
     
     def receive(self):
         ''' 
@@ -116,7 +124,7 @@ class RunControl(object):
     #                     self.status = ch.get_head_wait('DAQCMD', self.ch_com.cmdsize)
     #                     if self.status >=0 and self.ch_com.status >=0 :
     #                         self.cmd = self.ch_com.get_cmd() # recieved command contains command word [0] and additional info [1]... different for each case
-                if not self.CH_head_reciever.is_alive():
+                if not self.CH_head_reciever.is_alive() and self._run :
                     self.CH_head_reciever.start() # TODO: CH receiver does not terminate upon 2 x ctrl+c
                 if not self.converter.is_alive() and self.converter_started:
                     logging.error('\n\n\n         DataConverter was started but is not alive anymore \n\n')
@@ -163,17 +171,20 @@ class RunControl(object):
                         self.SoS_rec = False
                     elif self.command == 'EoS' and self.converter.EoS_data_flag.wait(0.01) and self.EoS_rec:
                         self.special_header['frameTime'] = 0xFF005C04
+                        self.special_header['cycleID'] = self.cycleID
                         self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
                         self.ch_com.send_done('EoS', self.partitionID, self.status)
                         self.converter.EoS_reset() # TODO: bad practice, reset should not be here but in react method
                         self.EoS_rec = False
                 elif self.CH_head_reciever.status.value < 0 :
-                    logger.error('Header could not be recieved')
+                    if not self.error_printed:
+                        logger.error('Header could not be recieved')
+                        self.error_printed = True
                 if self._stop == True:
                     break
                 else:
                     continue
-            except RuntimeWarning:
+            except RuntimeWarning, RuntimeError:
                 if self.converter_started == False:
                     print "DataConverter alive? ", self.converter.is_alive()
                     self.converter.stop()
@@ -182,6 +193,7 @@ class RunControl(object):
                         self.converter.start()
                         if self.converter.is_alive():
                             self.converter_started = True
+                    self.disconnect_CH(self.disp_addr)
                     continue
                 else:
                     break
@@ -193,6 +205,7 @@ class RunControl(object):
             if self.scan_status:
                 self.join_scan_thread(timeout = 0.01)
                 self.mngr.current_run.abort()
+        self.disconnect_CH(self.disp_addr)
         logger.error('Loop exited')
         
 #             
