@@ -11,11 +11,11 @@ import multiprocessing
 
 import numpy as np
 
-import control_host_coms as ch
+from PyControlHost import control_host_coms as ch
 from pybar import *
 import ship_data_converter
 from  ControlHost import CHostInterface, FrHeader, CHostReceiveHeader
-from bdaq53_send_data import transfer_file
+# from bdaq53_send_data import transfer_file
 # from signal import SIGINT
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - [%(levelname)-8s] (%(threadName)-10s) %(message)s')
@@ -255,8 +255,8 @@ class RunControl(object):
             self.join_scan_thread = self.mngr.run_run(ExtTriggerScanSHiP, run_conf={'scan_timeout': 86400,# 'max_triggers':0, 
                                                                         'trig_count':self.bcids, 'no_data_timeout':0, 'ship_run_number': self.run_number},
                                                                         use_thread=True)
-#             self.scan_status = self.join_scan_thread(0.01)
-#             transfer_file('/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/98_module_0_ext_trigger_scan_s_hi_p.h5',#'/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/96_module_0_ext_trigger_scan.h5',
+            self.scan_status = self.join_scan_thread(0.01)
+#             transfer_file('/media/silab/data/98_module_0_ext_trigger_scan_s_hi_p.h5',#'/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/96_module_0_ext_trigger_scan.h5',
 #                            self.converter_socket_addr[:-4] + ports[0])
             logger.info('Scan started, status = %s' % self.scan_status)
             if self.scan_status == 'RUNNING': 
@@ -284,8 +284,7 @@ class RunControl(object):
             self.converter.cycle_ID.value = cycleID
             logger.info('Recieved SoS header, cycleID = %s' % cycleID)
             self.converter.SoS_reset()
-#             transfer_file('/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/98_module_0_ext_trigger_scan_s_hi_p.h5',#'/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/96_module_0_ext_trigger_scan.h5',
-#                            self.converter_socket_addr[:-4] + ports[0])
+#             transfer_file('/media/silab/data/98_module_0_ext_trigger_scan_s_hi_p.h5',self.converter_socket_addr[:-4] + ports[0])
             self.special_header['frameTime'] = 0xFF005C03
             self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
         elif self.command == 'EoS': # trigger EoS header, sent after last event

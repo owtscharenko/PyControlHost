@@ -1,7 +1,7 @@
 import logging
 from ctypes import Structure, c_ushort, c_int, c_uint
 import numpy as np
-import control_host_coms as ch
+from PyControlHost import control_host_coms as ch
 import multiprocessing
 import signal
 
@@ -129,7 +129,7 @@ class CHostInterface():
 #         if self.status < 0:
 #             self.logger.error('Sending package failed')
             
-    def send_data(self, tag, header,hits):
+    def send_data(self, tag, header, hits):
         if isinstance(hits,np.ndarray):
             self.status = ch.send_fulldata_numpy(tag, header, hits)
         else:

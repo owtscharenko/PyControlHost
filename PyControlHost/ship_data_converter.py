@@ -14,7 +14,7 @@ from ctypes import c_ushort, c_int, c_char_p
 import tables as tb
 
 from pybar_fei4_interpreter.data_interpreter import PyDataInterpreter
-from  ControlHost import CHostInterface, FrHeader, Hit
+from  PyControlHost.ControlHost import CHostInterface, FrHeader, Hit
 
 
 
