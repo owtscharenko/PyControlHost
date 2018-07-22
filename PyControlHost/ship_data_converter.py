@@ -237,7 +237,7 @@ class DataConverter(multiprocessing.Process):
         self.n_readout = 0
         self.n_modules = 8
         self.socket_addr = pybar_addr
-        self.address = pybar_addr[:-4]
+        self.address = pybar_addr#[:-4]
         self.ports = ports
         
         self.multi_chip_event_dtype =[('event_number', '<i8'),
