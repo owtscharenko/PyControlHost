@@ -547,7 +547,8 @@ class DataConverter(multiprocessing.Process):
                             with tb.open_file('./RUN_%03d/partition_%s_run_%03d.h5' % (self.run_number.value, hex(self.partitionID), self.run_number.value), mode='a', title="SHiP_raw_data") as run_file:
 #                                 name = self.get_file_date(self.get_cycle_ID())
                                 self.logger.info('opening run file %s' % run_file.filename)
-                                spill_group = run_file.create_group(where = "/",name = 'Spill_%s' % self.file_date, title = 'Spill_%s' % self.file_date, filters = tb.Filters(complib='blosc', complevel=5, fletcher32=False))
+                                self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value/5.)).strftime("%Y_%m_%d_%H_%M_%S")
+                                spill_group = run_file.create_group(where = "/", name = 'Spill_%s' % self.file_date, title = 'Spill_%s' % self.file_date, filters = tb.Filters(complib='blosc', complevel=5, fletcher32=False))
                                 header_table = run_file.create_table(where = spill_group, name = 'Headers', description = Header_table, title = 'Headers to event data')
                                 hit_table = run_file.create_table(where = spill_group, name = 'Hits', description = SHiP_data_table, title = 'Hits')
                                 for i, index in enumerate(indices):

@@ -304,11 +304,11 @@ class RunControl(object):
             self.SoS_rec = True
             self.converter.SoS_flag.set()
             if len(self.cmd) > 1:
-                cycleID = np.uint64(self.cmd[1])
+                self.cycleID = np.uint64(int(self.cmd[1],16))
             else:
-                cycleID = self.cycle_ID() # create own cycleID if SoS command does not provide one
+                self.cycleID = self.cycle_ID() # create own cycleID if SoS command does not provide one
             self.converter.cycle_ID.value = cycleID
-            logger.info('Recieved SoS header, cycleID = %s' % cycleID)
+            logger.info('Recieved SoS header, cycleID = %s' % self.cycleID)
             self.converter.SoS_reset()
 #             transfer_file('/media/silab/data/98_module_0_ext_trigger_scan_s_hi_p.h5',self.converter_socket_addr[:-4] + ports[0])
             self.special_header['frameTime'] = 0xFF005C03
