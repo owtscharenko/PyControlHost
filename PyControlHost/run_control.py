@@ -124,7 +124,7 @@ class RunControl(object):
     #                     self.status = ch.get_head_wait('DAQCMD', self.ch_com.cmdsize)
     #                     if self.status >=0 and self.ch_com.status >=0 :
     #                         self.cmd = self.ch_com.get_cmd() # recieved command contains command word [0] and additional info [1]... different for each case
-                if not self.CH_head_reciever.is_alive() and self._run :
+                if not self.CH_head_reciever.is_alive() and self._run==True :
                     self.CH_head_reciever.start() # TODO: CH receiver does not terminate upon 2 x ctrl+c
                 if not self.converter.is_alive() and self.converter_started:
                     logging.error('\n\n\n         DataConverter was started but is not alive anymore \n\n')
