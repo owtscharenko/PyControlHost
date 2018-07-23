@@ -47,7 +47,7 @@ class RunControl(object):
         self.EoS_rec = False
         self.SoS_rec = False
         self.Enable_rec = False
-        self.error_printed = False
+        self.header_error = False
         self.converter_started = False
         self.terminated = False
         self.cmd = []
@@ -125,7 +125,7 @@ class RunControl(object):
     #                     if self.status >=0 and self.ch_com.status >=0 :
     #                         self.cmd = self.ch_com.get_cmd() # recieved command contains command word [0] and additional info [1]... different for each case
                 if not self.CH_head_reciever.is_alive() and self._run==True :
-                    self.CH_head_reciever.start() # TODO: CH receiver does not terminate upon 2 x ctrl+c
+                    self.CH_head_reciever.start()
                 if not self.converter.is_alive() and self.converter_started:
                     logging.error('\n\n\n         DataConverter was started but is not alive anymore \n\n')
                     self.converter_started = False
@@ -144,7 +144,7 @@ class RunControl(object):
                     else:
                         logger.error('Command=%s could not be identified' % self.cmd)
                 elif self.command in self.commands and self.CH_head_reciever.status.value >=0:
-                    self.error_printed = False
+                    self.header_error = False
                     if self.command =='Enable' and self.Enable_rec:
                         self.ch_com.send_done('Enable',self.partitionID, self.status)
                         self.Enable_rec = False
@@ -179,9 +179,9 @@ class RunControl(object):
                         self.converter.EoS_reset() # TODO: bad practice, reset should not be here but in react method
                         self.EoS_rec = False
                 elif self.CH_head_reciever.status.value < 0 :
-                    if not self.error_printed:
+                    if self.header_error == False:
                         logger.error('Header could not be recieved')
-                        self.error_printed = True
+                        self.header_error = True
                 if self._stop == True:
                     break
                 else:
@@ -333,7 +333,7 @@ if __name__ == '__main__':
     options, args = parser.parse_args()
     if len(args) == 1 and not args[0].find('configuration')==-1 :
         dispatcher_addr = '127.0.0.1'
-        converter_addr = 'tcp://127.0.0.1'
+        converter_addr = 'tcp://127.0.0.1:'
         configuration = args[0]
         partitionID = '0X0802'
     elif len(args) == 4:
