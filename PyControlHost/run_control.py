@@ -153,7 +153,7 @@ class RunControl(object):
                         if self.scan_status == 'RUNNING' :
                             self.special_header['frameTime'] = 0xFF005C01
                             self.special_header['cycleID'] = self.cycleID
-                            self.ch_com.send_data(tag = 'RAW_' + partIDhex, header = self.special_header, hits=None)
+                            self.ch_com.send_data(tag = 'RAW_' + self.partIDhex, header = self.special_header, hits=None)
                             self.ch_com.send_done('SoR',self.partitionID, self.status)
                             self.SoR_rec = False
                     elif self.command == 'EoR' and self.EoR_rec:
