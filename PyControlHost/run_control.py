@@ -307,7 +307,7 @@ class RunControl(object):
                 self.cycleID = np.uint64(int(self.cmd[1],16))
             else:
                 self.cycleID = self.cycle_ID() # create own cycleID if SoS command does not provide one
-            self.converter.cycle_ID.value = cycleID
+            self.converter.cycle_ID.value = self.cycleID
             logger.info('Recieved SoS header, cycleID = %s' % self.cycleID)
             self.converter.SoS_reset()
 #             transfer_file('/media/silab/data/98_module_0_ext_trigger_scan_s_hi_p.h5',self.converter_socket_addr[:-4] + ports[0])
