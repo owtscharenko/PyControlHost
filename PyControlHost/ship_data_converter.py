@@ -277,6 +277,7 @@ class DataConverter(multiprocessing.Process):
         self.total_events = 0
         self.start_date = datetime.datetime(2015, 04, 8, 00, 00)
         self.cycle_ID = multiprocessing.Value('i',0)
+        self.n_spills = multiprocessing.Value('i',0)
         self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value /5.)).strftime("%Y_%m_%d_%H_%M_%S")
         self.run_number = multiprocessing.Value('i',0)
         self.spill_file_name = './default.h5'
@@ -348,6 +349,7 @@ class DataConverter(multiprocessing.Process):
             self.SoR_flag.clear()
             self.EoR_flag.clear()
             self.SoS_flag.clear()
+            self.n_spills.value = 0
             self.arrays_read_flag.clear()
             self.EoS_data_flag.clear()
             
@@ -369,6 +371,7 @@ class DataConverter(multiprocessing.Process):
             self.EoS_data_flag.clear()
             self.all_workers_finished.clear()
             self.worker_reset_flag.clear()
+            self.n_spills.value += 1
 #             self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value/5.)).strftime("%Y_%m_%d_%H_%M_%S")
 #             print "spill time:", datetime.timedelta(seconds = self.cycle_ID.value/5.).strftime("%Y_%m_%d_%H_%M_%S")
 #             self.spill_file_name = "./RUN_%03d/%s.txt" % (self.run_number.value, self.file_date) 
@@ -446,9 +449,14 @@ class DataConverter(multiprocessing.Process):
 #                 module_hits['tot'] = hits['tot']
 #                 module_hits['moduleID'] = moduleID
 #                 hit_array = np.r_[hit_array,module_hits]
-                
-                send_array = hit_array.copy()
-                send_end.send(send_array) # TODO: last event is not sent
+
+                # make sure that last event does not show up as first event in next spill. TODO: last event is not sent
+                if hit_array.shape[0] > 0 and self.n_spills.value > 1:
+                    hit_array2 = hit_array[np.where(hit_array['event_number'] != hit_array[0]['event_number'])]
+                    send_array = hit_array2.copy()
+                else:
+                    send_array = hit_array.copy()
+                send_end.send(send_array) 
                 self.worker_finished_flags[moduleID].set()
                 self.logger.info("Worker %s finished, received %s hits" % (moduleID , hit_array.shape))
                 hit_array = np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C')
