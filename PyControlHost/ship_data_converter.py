@@ -419,14 +419,13 @@ class DataConverter(multiprocessing.Process):
         '''one worker for each FE chip, since RAW data comes from FIFO separated by moduleID.
            It is necessary to instantiate zmq.Context() in calling method. Otherwise it has no acces when called as multiprocessing.process.
         '''
-        
         context = zmq.Context()
         socket_pull = context.socket(zmq.PULL)  # subscriber
 #         socket_pull.setsockopt(zmq.SUBSCRIBE, '')  # do not filter any data needed for PUB/SUB but not for PUSH/PULL
         socket_pull.bind(socket_addr)
         self.logger.info("Worker %s started, socket %s" % (moduleID, socket_addr))
-        hit_array = np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C')
-        
+        hit_array = np.zeros(shape=(0,),dtype = self.multi_chip_event_dtype,order='C')
+        counter = 0
         interpreter = PyDataInterpreter()
         interpreter.create_empty_event_hits(True)
         interpreter.set_trigger_data_format(1)
@@ -483,7 +482,8 @@ class DataConverter(multiprocessing.Process):
 #                 interpreter.store_event()
 #                   
 #                 hits = interpreter.get_hits()
-#                 module_hits = np.empty(shape=(hits.shape[0],),dtype = self.multi_chip_event_dtype, order = 'C')
+#  
+#                 module_hits = np.zeros(shape=(hits.shape[0],),dtype = self.multi_chip_event_dtype, order = 'C')
 #                 module_hits['event_number'] = hits['event_number']
 #                 module_hits['trigger_number'] = hits['trigger_number']
 #                 module_hits['trigger_time_stamp'] = hits['trigger_time_stamp']
@@ -506,10 +506,13 @@ class DataConverter(multiprocessing.Process):
                 else:
                     send_array = hit_array.copy()
                 send_end.send(send_array) 
+                
+#                 send_array = hit_array.copy()
+#                 send_end.send(hit_array) 
                 self.worker_finished_flags[moduleID].set()
                 self.logger.info("Worker %s finished, received %s hits" % (moduleID , hit_array.shape))
-                hit_array = np.empty(shape=(0,),dtype = self.multi_chip_event_dtype,order='C')
-
+                hit_array = np.zeros(shape=(0,),dtype = self.multi_chip_event_dtype,order='C')
+                counter = 0
             try:
                 meta_data = socket_pull.recv_json(flags=zmq.NOBLOCK)
             except zmq.Again:
@@ -529,7 +532,7 @@ class DataConverter(multiprocessing.Process):
                     # build new array with moduleID, take only necessary data
                     hits = interpreter.get_hits()
 #                     hits = self.interpreters[moduleID].get_hits()
-                    module_hits = np.empty(shape=(hits.shape[0],),dtype = self.multi_chip_event_dtype, order = 'C')
+                    module_hits = np.zeros(shape=(hits.shape[0],),dtype = self.multi_chip_event_dtype, order = 'C')
                     module_hits['event_number'] = hits['event_number']
                     module_hits['trigger_number'] = hits['trigger_number']
                     module_hits['trigger_time_stamp'] = hits['trigger_time_stamp']
@@ -592,7 +595,7 @@ class DataConverter(multiprocessing.Process):
                                 
                             start = datetime.datetime.now()
                             # merge hit data of 8 FE to one array, sorted by event_number
-                            multimodule_hits = np.zeros(shape=(nhits,),dtype = self.multi_chip_event_dtype)
+                            merge_table = np.zeros(shape=(nhits,),dtype = self.multi_chip_event_dtype)
                             merge_hits_tables(hit_arrays[0],hit_arrays[1],hit_arrays[2],hit_arrays[3],hit_arrays[4],
                                               hit_arrays[5],hit_arrays[6],hit_arrays[7],merge_table)
                             multimodule_hits = merge_table.copy()
@@ -604,9 +607,9 @@ class DataConverter(multiprocessing.Process):
                             self.n_events.value = indices.shape[0]
                             print 'nevents = %s , nhits = %s, ' %(self.n_events.value, nhits) #  last event number = %s" %(n_events, nhits, event_numbers[-1])
     
-                            headers = np.empty(shape = (n_events,), dtype = [('event_number', np.int64), ('size',np.uint16), ('partID', np.uint16), ('cycleID', np.uint32), ('frameTime', np.int32), ('timeExtent', np.uint16), ('flags', np.uint16)])
-                            hits = np.empty(shape = (nhits,), dtype = [('event_number', np.int64),('channelID', np.uint16),('hit_data', np.uint16)])
-                            
+                            headers = np.zeros(shape = (self.n_events.value,), dtype = [('event_number', np.int64), ('size',np.uint16), ('partID', np.uint16), ('cycleID', np.uint32), ('frameTime', np.int32), ('timeExtent', np.uint16), ('flags', np.uint16)])
+                            hits = np.zeros(shape = (nhits,), dtype = [('event_number', np.int64),('channelID', np.uint16),('hit_data', np.uint16)])
+                            ch_event_numbers = np.arange(0,self.n_events.value +1)
                             with tb.open_file('./RUN_%03d/partition_%s_run_%03d.h5' % (self.run_number.value, hex(self.partitionID), self.run_number.value), mode='a', title="SHiP_raw_data") as run_file:
                                 
                                 self.logger.info('opening run file %s' % run_file.filename)
@@ -621,18 +624,23 @@ class DataConverter(multiprocessing.Process):
                                     else:
                                         event = multimodule_hits[index:indices[i+1]]
                                     # build SHiP data format
+                                    if event.shape[0] == 0:
+                                        print '      =======no hits in event %s=======' %i
+                                        print '      =======no hits in event %s=======' %i
+                                        print '      =======no hits in event %s=======' %i
+                                        continue
                                     channelID = np.bitwise_or(event['row']<<7,event['column'],order='C',dtype=np.uint16)
                                     first_word = np.bitwise_or(event['tot']<<4,event['moduleID'],dtype=np.uint16)
                                     second_word = np.bitwise_or(0<<4,event['relative_BCID'],dtype=np.uint16)
                                     hit_data = np.bitwise_or(first_word<<8,second_word, order = 'C', dtype= np.uint16)
                                     
                                     #fill numpy array with SHiP data
-                                    self.ch_hit_data = np.empty(channelID.shape[0], dtype = Hit)
+                                    self.ch_hit_data = np.zeros(channelID.shape[0], dtype = Hit)
                                     self.ch_hit_data["channelID"] = channelID
                                     self.ch_hit_data["hit_data"] = hit_data
                                     
                                     # each event needs a frame header, extra array for header
-                                    self.data_header = np.empty(shape=(1,), dtype= FrHeader)
+                                    self.data_header = np.zeros(shape=(1,), dtype= FrHeader)
                                     self.data_header['size'] = channelID.nbytes + 16
                                     self.data_header['partID'] = self.partitionID
                                     self.data_header['cycleID'] = self.cycle_ID.value
