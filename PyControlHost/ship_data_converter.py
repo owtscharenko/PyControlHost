@@ -263,11 +263,13 @@ class DataConverter(multiprocessing.Process):
         self.SoS_flag = multiprocessing.Event()
         self.EoS_flag = multiprocessing.Event()
         self.EoS_data_flag = multiprocessing.Event()
+        self.fifo_read = multiprocessing.Event()
         self.worker_reset_flag = multiprocessing.Event()
         self.worker_finished_flags= [multiprocessing.Event() for _ in range(self.n_modules)]
         self.worker_reset_finished = [multiprocessing.Event() for _ in range(self.n_modules)]
         self.send_data_flag = [multiprocessing.Event() for _ in range(self.n_modules)]
         self.arrays_read_flag = multiprocessing.Event()
+        self.dummy_flag = multiprocessing.Event()
         self.all_workers_finished = multiprocessing.Event()
         self.reset_lock = multiprocessing.Lock()
          
@@ -349,6 +351,7 @@ class DataConverter(multiprocessing.Process):
             self.SoR_flag.clear()
             self.EoR_flag.clear()
             self.SoS_flag.clear()
+            self.dummy_flag.clear()
             self.n_spills.value = 0
             self.arrays_read_flag.clear()
             self.EoS_data_flag.clear()
@@ -371,6 +374,7 @@ class DataConverter(multiprocessing.Process):
             self.EoS_data_flag.clear()
             self.all_workers_finished.clear()
             self.worker_reset_flag.clear()
+            self.dummy_flag.clear()
             self.n_spills.value += 1
 #             self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value/5.)).strftime("%Y_%m_%d_%H_%M_%S")
 #             print "spill time:", datetime.timedelta(seconds = self.cycle_ID.value/5.).strftime("%Y_%m_%d_%H_%M_%S")
@@ -388,6 +392,7 @@ class DataConverter(multiprocessing.Process):
             for flag in self.send_data_flag:
                 flag.clear()
             self.arrays_read_flag.clear()
+            self.fifo_read.clear()
             self.EoS_flag.clear()
         self.logger.info('EoS reset finished')
     
@@ -434,10 +439,48 @@ class DataConverter(multiprocessing.Process):
                     interpreter.reset()
                     self.logger.info("Resetting worker %s" % (moduleID))
                     self.worker_reset_finished[moduleID].set()
-            if self.EoS_flag.is_set() and not self.worker_finished_flags[moduleID].is_set() : # EoS_flag is set in run_control after reception of EoS command 
-                self.send_data_flag[moduleID].set()
-                # store remaining buffered event in the interpreter at EoS
+            if self.EoS_flag.is_set() and not self.worker_finished_flags[moduleID].is_set(): # EoS_flag is set in run_control after reception of EoS command 
+                while counter > 9:
+                    self.dummy_flag.wait(0.03)
+                    try:
+                        meta_data = socket_pull.recv_json(flags=zmq.NOBLOCK)
+                    except zmq.Again:
+                        pass
+                    else:
+                        name = meta_data.pop('name')
+                        if name == 'ReadoutData':
+                            data = socket_pull.recv()
+                            # reconstruct numpy array
+                            buf = buffer(data)
+                            dtype = meta_data.pop('dtype')
+                            shape = meta_data.pop('shape')
+                            data_array = np.frombuffer(buf, dtype=dtype).reshape(shape)
+                            
+                            interpreter.interpret_raw_data(data_array)
+        #                     self.analyze_raw_data(raw_data=np.ascontiguousarray(data_array), module=moduleID)
+                            # build new array with moduleID, take only necessary data
+                            hits = interpreter.get_hits()
+        #                     hits = self.interpreters[moduleID].get_hits()
+                            module_hits = np.zeros(shape=(hits.shape[0],),dtype = self.multi_chip_event_dtype, order = 'C')
+                            module_hits['event_number'] = hits['event_number']
+                            module_hits['trigger_number'] = hits['trigger_number']
+                            module_hits['trigger_time_stamp'] = hits['trigger_time_stamp']
+                            module_hits['relative_BCID'] = hits['relative_BCID']
+                            module_hits['column'] = hits['column']
+                            module_hits['row'] = hits['row']
+                            module_hits['tot'] = hits['tot']
+                            module_hits['moduleID'] = moduleID
+                            
+                            hit_array = np.concatenate((hit_array,module_hits))
+                    
+                    counter +=1
+
+#                 if hit_array.shape[0] > 0:
+#                     self.logger.info("hit array shape worker %s before store event" % moduleID, hit_array.shape)
+#                     self.logger.info("hit array worker %s last entry before store event" % moduleID, hit_array[-1])
+                
 #                 interpreter.store_event()
+#                   
 #                 hits = interpreter.get_hits()
 #                 module_hits = np.empty(shape=(hits.shape[0],),dtype = self.multi_chip_event_dtype, order = 'C')
 #                 module_hits['event_number'] = hits['event_number']
@@ -448,9 +491,14 @@ class DataConverter(multiprocessing.Process):
 #                 module_hits['row'] = hits['row']
 #                 module_hits['tot'] = hits['tot']
 #                 module_hits['moduleID'] = moduleID
-#                 hit_array = np.r_[hit_array,module_hits]
-
-                # make sure that last event does not show up as first event in next spill. TODO: last event is not sent
+#                 # append chunk to hit array
+#                 hit_array = np.concatenate((hit_array,module_hits))
+                
+#                 if hit_array.shape[0] > 0:
+#                     self.logger.info("hit array shape worker %s " % moduleID, hit_array.shape)
+#                     self.logger.info("hit array worker %s last entry" % moduleID, hit_array[-1])
+                self.send_data_flag[moduleID].set()
+                
                 if hit_array.shape[0] > 0 and self.n_spills.value > 1:
                     hit_array2 = hit_array[np.where(hit_array['event_number'] != hit_array[0]['event_number'])]
                     send_array = hit_array2.copy()
@@ -490,8 +538,12 @@ class DataConverter(multiprocessing.Process):
                     module_hits['tot'] = hits['tot']
                     module_hits['moduleID'] = moduleID
                     # append chunk to hit array
-                    hit_array = np.r_[hit_array,module_hits]
-                    
+#                     hit_array = np.r_[hit_array,module_hits]
+                    hit_array = np.concatenate((hit_array,module_hits))
+#                     if hit_array.shape[0] > 0:
+#                         self.logger.info("loop hit array worker %s last entry " %moduleID, hit_array[-1])
+#                         self.logger.info("loop hit array worker %s shape" %moduleID, hit_array.shape)
+
     
     def run(self):
         ''' create workers upon start and collect data after EoS'''
@@ -526,11 +578,12 @@ class DataConverter(multiprocessing.Process):
 #                             continue
 #                         if self.all_workers_finished.is_set():                        
 
-                        if all(pipe.poll() for pipe in self.pipes):
+                        if all(pipe.poll(0.1) for pipe in self.pipes):
                             self.all_workers_finished.set() # triggers DAQDONE message for SoS
 #                         if all(flag.is_set() for flag in self.send_data_flag):
                             for i, pipe in enumerate(self.pipes):
                                 hit_arrays[i] = pipe.recv().copy()
+                                
                             self.logger.info('All workers finished, starting conversion')
                             nhits = 0
                             for hit_array in hit_arrays:
