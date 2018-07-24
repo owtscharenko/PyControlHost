@@ -277,9 +277,10 @@ class DataConverter(multiprocessing.Process):
         self.kill_received = False
         self.ch = CHostInterface()
         self.total_events = 0
-        self.start_date = datetime.datetime(2015, 04, 8, 00, 00)
+        self.start_date = datetime.datetime(2015, 04, 8, 12, 00)
         self.cycle_ID = multiprocessing.Value('i',0)
         self.n_spills = multiprocessing.Value('i',0)
+        self.n_events = multiprocessing.Value('i',0)
         self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value /5.)).strftime("%Y_%m_%d_%H_%M_%S")
         self.run_number = multiprocessing.Value('i',0)
         self.spill_file_name = './default.h5'
@@ -593,28 +594,29 @@ class DataConverter(multiprocessing.Process):
                             # merge hit data of 8 FE to one array, sorted by event_number
                             multimodule_hits = np.zeros(shape=(nhits,),dtype = self.multi_chip_event_dtype)
                             merge_hits_tables(hit_arrays[0],hit_arrays[1],hit_arrays[2],hit_arrays[3],hit_arrays[4],
-                                              hit_arrays[5],hit_arrays[6],hit_arrays[7],multimodule_hits)
-                            
+                                              hit_arrays[5],hit_arrays[6],hit_arrays[7],merge_table)
+                            multimodule_hits = merge_table.copy()
                             self.arrays_read_flag.set()
                             self.SoS_flag.clear()  
                             
                             event_numbers , indices = np.unique(multimodule_hits['event_number'],return_index = True)
                             print 'time for sorting:', datetime.datetime.now() - start
-                            n_events = indices.shape[0]
-                            print 'nevents = %s , nhits = %s, ' %(n_events, nhits) #  last event number = %s" %(n_events, nhits, event_numbers[-1])
+                            self.n_events.value = indices.shape[0]
+                            print 'nevents = %s , nhits = %s, ' %(self.n_events.value, nhits) #  last event number = %s" %(n_events, nhits, event_numbers[-1])
     
                             headers = np.empty(shape = (n_events,), dtype = [('event_number', np.int64), ('size',np.uint16), ('partID', np.uint16), ('cycleID', np.uint32), ('frameTime', np.int32), ('timeExtent', np.uint16), ('flags', np.uint16)])
                             hits = np.empty(shape = (nhits,), dtype = [('event_number', np.int64),('channelID', np.uint16),('hit_data', np.uint16)])
                             
                             with tb.open_file('./RUN_%03d/partition_%s_run_%03d.h5' % (self.run_number.value, hex(self.partitionID), self.run_number.value), mode='a', title="SHiP_raw_data") as run_file:
-#                                 name = self.get_file_date(self.get_cycle_ID())
+                                
                                 self.logger.info('opening run file %s' % run_file.filename)
-                                self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value/5.)).strftime("%Y_%m_%d_%H_%M_%S")
-                                spill_group = run_file.create_group(where = "/", name = 'Spill_%s' % self.file_date, title = 'Spill_%s' % self.file_date, filters = tb.Filters(complib='blosc', complevel=5, fletcher32=False))
+#                                 self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value/5.)).strftime("%Y_%m_%d_%H_%M_%S")
+                                spill_group = run_file.create_group(where = "/", name = 'Spill_%s' % self.cycle_ID.value, title = 'Spill_%s' % self.cycle_ID.value, filters = tb.Filters(complib='blosc', complevel=5, fletcher32=False))
                                 header_table = run_file.create_table(where = spill_group, name = 'Headers', description = Header_table, title = 'Headers to event data')
                                 hit_table = run_file.create_table(where = spill_group, name = 'Hits', description = SHiP_data_table, title = 'Hits')
                                 for i, index in enumerate(indices):
-                                    if i == n_events-1:
+#                                     print "getting event %s" %i
+                                    if i == self.n_events.value-1:
                                         event = multimodule_hits[index:]
                                     else:
                                         event = multimodule_hits[index:indices[i+1]]
@@ -635,14 +637,14 @@ class DataConverter(multiprocessing.Process):
                                     self.data_header['partID'] = self.partitionID
                                     self.data_header['cycleID'] = self.cycle_ID.value
                                     self.data_header['frameTime'] = event[0]['trigger_time_stamp']
-                                    self.data_header['timeExtent'] = 15
+                                    self.data_header['timeExtent'] = ch_event_numbers[i]
                                     self.data_header['flags'] = 0
                                     
                                     # send header and hit_data to dispatcher
                                     self.ch.send_data(self.RAW_data_tag, self.data_header, self.ch_hit_data)
                                     
                                     # write hits to numpy array for local storage
-                                    if i == n_events-1:
+                                    if i == self.n_events.value-1:
                                         hits[index:]['event_number'] = event['event_number']
                                         hits[index:]['channelID'] = self.ch_hit_data['channelID']
                                         hits[index:]['hit_data'] = self.ch_hit_data['hit_data']
