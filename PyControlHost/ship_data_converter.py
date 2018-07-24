@@ -123,7 +123,7 @@ def build_data(cycleID, partitionID, event_numbers, multimodule_hits, hit_data_d
         data_header = np.empty(shape=(1,), dtype= [("size", np.uint16),
                                                   ("partID", np.uint16),
                                                   ("cycleID",np.int32),
-                                                  ("frameTime", np.int32),
+                                                  ("frameTime", np.uint32),
                                                   ("timeExtent", np.uint16),
                                                   ("flags",  np.uint16)])
         data_header['size'] = channelID.nbytes + 16
@@ -616,8 +616,8 @@ class DataConverter(multiprocessing.Process):
                             # clear hit arrays for reception of worker data
                             for i in range(self.n_modules):
                                 hit_arrays[i] = 0
-                            self.logger.info('Sent %s events with %s hits' %(n_events, nhits))
-                            print "time needed for %s events : %s with saving" %(n_events,(datetime.datetime.now()-start))
+                            self.logger.info('Sent %s events with %s hits' %(self.n_events.value, nhits))
+                            print "time needed for %s events : %s with saving" %(self.n_events.value,(datetime.datetime.now()-start))
                 
                         
     def stop(self):
