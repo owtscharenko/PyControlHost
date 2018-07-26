@@ -440,8 +440,8 @@ class DataConverter(multiprocessing.Process):
                     self.logger.info("Resetting worker %s" % (moduleID))
                     self.worker_reset_finished[moduleID].set()
             if self.EoS_flag.is_set() and not self.worker_finished_flags[moduleID].is_set(): # EoS_flag is set in run_control after reception of EoS command 
-                while counter > 9:
-                    self.dummy_flag.wait(0.003)
+                while counter < 3:
+                    self.dummy_flag.wait(0.03)
                     try:
                         meta_data = socket_pull.recv_json(flags=zmq.NOBLOCK)
                     except zmq.Again:
