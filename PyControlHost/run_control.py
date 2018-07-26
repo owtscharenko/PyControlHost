@@ -41,13 +41,13 @@ class RunControl(object):
         self.ch_com = CHostInterface()
         self.connect_CH(self.disp_addr,self.DetName)
         self._stop = False
-        self._run = True
+        self._run = multiprocessing.Event()
         self.EoR_rec = False
         self.SoR_rec = False
         self.EoS_rec = False
         self.SoS_rec = False
         self.Enable_rec = False
-        self.header_error = False
+        self.error_printed = False
         self.converter_started = False
         self.terminated = False
         self.cmd = []
@@ -90,8 +90,12 @@ class RunControl(object):
         logger.info('Dropping connection to %s' % disp_addr)
         self.ch_com.drop_conn()
         self.CH_head_reciever.stop()
-        self._run = False
+        self._run.clear()
         logger.info("setting self._run to False")
+        if self.join_scan_thread != None:
+            logger.info('aborting pyBAR scan thread')
+            self.mngr.current_run.abort()
+        
     
     def receive(self):
         ''' 
@@ -105,7 +109,7 @@ class RunControl(object):
             signal_handler = self._signal_handler
             signal.signal(signal.SIGINT, signal_handler)
 #             signal.signal(signal.SIGTERM, signal_handler)
-
+        self._run.set()
         self.converter = ship_data_converter.DataConverter(pybar_addr = self.converter_socket_addr, ports = self.ports, partitionID = self.partitionID)
         self.converter.name = 'DataConverter'
 #             converter.daemon = True
@@ -124,8 +128,9 @@ class RunControl(object):
     #                     self.status = ch.get_head_wait('DAQCMD', self.ch_com.cmdsize)
     #                     if self.status >=0 and self.ch_com.status >=0 :
     #                         self.cmd = self.ch_com.get_cmd() # recieved command contains command word [0] and additional info [1]... different for each case
-                if not self.CH_head_reciever.is_alive() and self._run == True :
-                    self.CH_head_reciever.start()
+                if not self.CH_head_reciever.is_alive():
+                    if self._run.wait(0.1):
+                    	self.CH_head_reciever.start()
                 if not self.converter.is_alive() and self.converter_started:
                     logging.error('\n\n\n         DataConverter was started but is not alive anymore \n\n')
                     self.converter_started = False
@@ -144,7 +149,7 @@ class RunControl(object):
                     else:
                         logger.error('Command=%s could not be identified' % self.cmd)
                 elif self.command in self.commands and self.CH_head_reciever.status.value >=0:
-                    self.header_error = False
+                    self.error_printed = False
                     if self.command =='Enable' and self.Enable_rec:
                         self.ch_com.send_done('Enable',self.partitionID, self.status)
                         self.Enable_rec = False
@@ -179,9 +184,9 @@ class RunControl(object):
                         self.converter.EoS_reset() # TODO: bad practice, reset should not be here but in react method
                         self.EoS_rec = False
                 elif self.CH_head_reciever.status.value < 0 :
-                    if self.header_error == False:
+                    if not self.error_printed:
                         logger.error('Header could not be recieved')
-                        self.header_error = True
+                        self.error_printed = True
                 if self._stop == True:
                     break
                 else:
@@ -191,11 +196,15 @@ class RunControl(object):
                     print "DataConverter alive? ", self.converter.is_alive()
                     self.converter.stop()
                     logger.info('Restarting DataConverter.')
-                    if not self.converter.is_alive():
+                    if not self.converter.is_alive(0.01):
                         self.converter.start()
-                        if self.converter.is_alive():
+                        if self.converter.is_alive(0.01):
                             self.converter_started = True
-                    self.disconnect_CH(self.disp_addr)
+                        else: 
+                            logger.error('could not recover DataConverter, breaking loop')
+                            self.disconnect_CH(self.disp_addr)
+                            self._stop = True
+                            break
                     continue
                 else:
                     break
@@ -344,7 +353,7 @@ if __name__ == '__main__':
         
     else:
         parser.error("incorrect number of arguments")
-    ports = ['5011','5012','5013','5014','5015','5016','5017','5018']
+    ports = ['5001','5002','5003','5004','5005','5006','5007','5008']
     bcids = 8
     rec = RunControl(dispatcher_addr,
                       converter_addr,
