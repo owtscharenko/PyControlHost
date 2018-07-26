@@ -649,6 +649,15 @@ class DataConverter(multiprocessing.Process):
                                     self.data_header['flags'] = 0
                                     
                                     # send header and hit_data to dispatcher
+                                    if i == 0:
+                                        SoS_header= np.zeros(shape=(1,), dtype= FrHeader)
+                                        SoS_header['size'] = 16
+                                        SoS_header['partID'] = self.partitionID
+                                        SoS_header['timeExtent'] = 0
+                                        SoS_header['flags'] = 0
+                                        SoS_header['frameTime'] = 0xFF005C03
+                                        SoS_header['cycleID'] = self.cycleID.value
+                                        self.ch.send_data(self.RAW_data_tag, SoS_header, hits=None)
                                     self.ch.send_data(self.RAW_data_tag, self.data_header, self.ch_hit_data)
                                     
                                     # write hits to numpy array for local storage
