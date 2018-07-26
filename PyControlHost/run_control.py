@@ -277,7 +277,7 @@ class RunControl(object):
 #                os.makedirs("./RUN_%03d/" % self.run_number)
             if not self.converter.is_alive():
                 self.converter.start()
-                self.converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
+                self.converter.reset(cycleID=0, msg = 'SoR command, resetting DataConverter')
                 self.converter_started = True
             else:
                 self.converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
@@ -307,7 +307,7 @@ class RunControl(object):
                 logger.error('Recieved EoR command, but no ExtTriggerScanSHiP running. Last scan status : %s' % self.scan_status)
             if self.converter.is_alive():
                 self.converter.EoR_flag.set()
-                self.converter.reset(cycleID = self.cycle_ID(), msg='EoR command, resetting DataConverter') # reset interpreter and event counter
+                self.converter.reset(cycleID = 0, msg='EoR command, resetting DataConverter') # reset interpreter and event counter
             else:
                 logger.error('Recieved EoR command to reset DataConverter, but no converter running')
         elif self.command == 'SoS': # new spill. Trigger counter will be reset by hardware signal. The software command triggers an empty header and resets of converter functions
