@@ -165,12 +165,12 @@ class RunControl(object):
                         if self.scan_status == 'FINISHED' or self.scan_status == 'ABORTED' or self.scan_status == 'STOPPED':
                             self.special_header['frameTime'] = 0xFF005C02
                             self.special_header['cycleID'] = self.cycleID
-                            self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
+                            self.ch_com.send_data(tag = 'RAW_' + self.partIDhex, header = self.special_header, hits=None)
                             self.ch_com.send_done('EoR',self.partitionID, self.status)
                         elif self.scan_status == 'CRASHED':
                             self.special_header['frameTime'] = 0xFF005C02
                             self.special_header['cycleID'] = self.cycleID
-                            self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
+                            self.ch_com.send_data(tag = 'RAW_' + self.partIDhex, header = self.special_header, hits=None)
                             self.ch_com.send_done('EoR',self.partitionID, self.status)
                         self.EoR_rec = False
                     elif self.converter.all_workers_finished.wait(0.01) and self.SoS_rec: # can not check for command = SoS because SoS done msg can only be sent after EoS (SoS is "done" after buffering last event. This is triggered bei EoS signal.)
@@ -179,7 +179,8 @@ class RunControl(object):
                     elif self.command == 'EoS' and self.converter.EoS_data_flag.wait(0.01) and self.EoS_rec:
                         self.special_header['frameTime'] = 0xFF005C04
                         self.special_header['cycleID'] = self.cycleID
-                        self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
+                        self.special_header['timeExtent'] = self.converter.n_events.value
+                        self.ch_com.send_data(tag = 'RAW_' + self.partIDhex, header = self.special_header, hits=None)
                         self.ch_com.send_done('EoS', self.partitionID, self.status)
                         self.converter.EoS_reset() # TODO: bad practice, reset should not be here but in react method
                         self.EoS_rec = False
@@ -320,9 +321,9 @@ class RunControl(object):
             logger.info('Recieved SoS header, cycleID = %s' % self.cycleID)
             self.converter.SoS_reset()
 #             transfer_file('/media/silab/data/98_module_0_ext_trigger_scan_s_hi_p.h5',self.converter_socket_addr[:-4] + ports[0])
-            self.special_header['frameTime'] = 0xFF005C03
-            self.special_header['cycleID'] = self.cycleID
-            self.ch_com.send_data(tag = 'RAW_0802', header = self.special_header, hits=None)
+#             self.special_header['frameTime'] = 0xFF005C03
+#             self.special_header['cycleID'] = self.cycleID
+#             self.ch_com.send_data(tag = 'RAW_' + self.partIDhex, header = self.special_header, hits=None)
         elif self.command == 'EoS': # trigger EoS header, sent after last event
             self.EoS_rec = True
             self.converter.EoS_flag.set()
