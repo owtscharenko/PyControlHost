@@ -702,29 +702,29 @@ class DataConverter(multiprocessing.Process):
 
 
 if __name__ == '__main__':
-   
-    usage = "Usage: %prog ADDRESS"
-    description = "ADDRESS: Remote address of the sender (default: tcp://127.0.0.1:5678).\n disp_addr: address of dispatcher to send data to (default 127.0.0.1) \n partitionID : identifier for ControlHost (default= 0x0802)"
-    parser = OptionParser(usage, description=description)
-    options, args = parser.parse_args()
-    if len(args) == 0:
-        socket_addr = 'tcp://127.0.0.1:5678'
-        disp_addr = '127.0.0.1'
-        partitionID = "0X0802"
-    elif len(args) == 3:
-        socket_addr = args[0]
-        disp_addr = args[1]
-        partitionID = args[2]
-    else:
-        parser.error("incorrect number of arguments")
-     
-    pr = cProfile.Profile()
-    ports = ['5001','5002','5003','5004','5005','5006','5007','5008',]
-    try:
-        converter = DataConverter(pybar_addr=socket_addr,disp_addr = disp_addr, ports = ports, partitionID = partitionID)
-        converter.start()
-    except (KeyboardInterrupt, SystemExit):
-        print "keyboard interrupt"
-        pr.disable()
-        pr.print_stats(sort='ncalls')
+    pass
+#     usage = "Usage: %prog ADDRESS"
+#     description = "ADDRESS: Remote address of the sender (default: tcp://127.0.0.1:5678).\n disp_addr: address of dispatcher to send data to (default 127.0.0.1) \n partitionID : identifier for ControlHost (default= 0x0802)"
+#     parser = OptionParser(usage, description=description)
+#     options, args = parser.parse_args()
+#     if len(args) == 0:
+#         socket_addr = 'tcp://127.0.0.1:5678'
+#         disp_addr = '127.0.0.1'
+#         partitionID = "0X0802"
+#     elif len(args) == 3:
+#         socket_addr = args[0]
+#         disp_addr = args[1]
+#         partitionID = args[2]
+#     else:
+#         parser.error("incorrect number of arguments")
+#      
+#     pr = cProfile.Profile()
+#     ports = ['5001','5002','5003','5004','5005','5006','5007','5008',]
+#     try:
+#         converter = DataConverter(pybar_addr=socket_addr,disp_addr = disp_addr, ports = ports, partitionID = partitionID)
+#         converter.start()
+#     except (KeyboardInterrupt, SystemExit):
+#         print "keyboard interrupt"
+#         pr.disable()
+#         pr.print_stats(sort='ncalls')
 
