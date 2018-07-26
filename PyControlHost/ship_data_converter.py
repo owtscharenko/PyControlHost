@@ -610,7 +610,7 @@ class DataConverter(multiprocessing.Process):
                             headers = np.zeros(shape = (self.n_events.value,), dtype = [('event_number', np.int64), ('size',np.uint16), ('partID', np.uint16), ('cycleID', np.uint32), ('frameTime', np.int32), ('timeExtent', np.uint16), ('flags', np.uint16)])
                             hits = np.zeros(shape = (nhits,), dtype = [('event_number', np.int64),('channelID', np.uint16),('hit_data', np.uint16)])
                             ch_event_numbers = np.arange(0,self.n_events.value +1)
-                            with tb.open_file('./RUN_%03d/partition_%s_run_%03d.h5' % (self.run_number.value, hex(self.partitionID), self.run_number.value), mode='a', title="SHiP_raw_data") as run_file:
+                            with tb.open_file('./run_data/partition_%s_run_%03d.h5' % (hex(self.partitionID), self.run_number.value), mode='a', title="SHiP_raw_data") as run_file:
                                 
                                 self.logger.info('opening run file %s' % run_file.filename)
 #                                 self.file_date = (self.start_date + datetime.timedelta(seconds = self.cycle_ID.value/5.)).strftime("%Y_%m_%d_%H_%M_%S")

@@ -273,8 +273,8 @@ class RunControl(object):
                 self.run_number = int(self.cmd[1])
             else:
                 self.run_number = 999
-            if not os.path.exists("./RUN_%03d/" % self.run_number):
-                os.makedirs("./RUN_%03d/" % self.run_number)
+#            if not os.path.exists("./RUN_%03d/" % self.run_number):
+#                os.makedirs("./RUN_%03d/" % self.run_number)
             if not self.converter.is_alive():
                 self.converter.start()
                 self.converter.reset(cycleID=self.cycle_ID(), msg = 'SoR command, resetting DataConverter')
