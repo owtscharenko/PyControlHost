@@ -680,7 +680,7 @@ class DataConverter(multiprocessing.Process):
                             for i in range(self.n_modules):
                                 hit_arrays[i] = 0
                             self.logger.info('Sent %s events with %s hits' %(self.n_events.value, nhits))
-                            print "time needed for %s events : %s with saving" %(self.n_events.value,(datetime.datetime.now()-start))
+                            print "time needed for merging, sending and saving %s events : %s" %(self.n_events.value,(datetime.datetime.now()-start))
                 
                         
     def stop(self):

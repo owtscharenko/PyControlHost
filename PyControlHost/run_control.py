@@ -288,9 +288,13 @@ class RunControl(object):
 #             self.join_scan_thread = self.mngr.run_run(ThresholdScan, use_thread=True, catch_exception=False)
             
             
-            self.join_scan_thread = self.mngr.run_run(ExtTriggerScanSHiP, run_conf={'scan_timeout': 86400,# 'max_triggers':0, 
-                                                                        'trig_count':self.bcids, 'ship_run_number': self.run_number},
-                                                                        use_thread=True ,catch_exception=False)
+            self.join_scan_thread = self.mngr.run_run(ExtTriggerScanSHiP, 
+                                                      run_conf={'scan_timeout': None,# 'max_triggers':0, 
+                                                                'trig_count':self.bcids, 'ship_run_number': self.run_number,
+                                                                'reset_rx_on_error':False,'no_data_timeout': None
+                                                                },use_thread=True ,catch_exception=False
+                                                      )
+            
             self.scan_status = self.join_scan_thread(10)
 #             transfer_file('/media/silab/data/98_module_0_ext_trigger_scan_s_hi_p.h5',#'/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/96_module_0_ext_trigger_scan.h5',
 #                            self.converter_socket_addr[:-4] + ports[0])
