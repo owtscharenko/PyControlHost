@@ -347,7 +347,7 @@ if __name__ == '__main__':
     options, args = parser.parse_args()
     if len(args) == 1 and not args[0].find('configuration')==-1 :
         dispatcher_addr = '127.0.0.1'
-        converter_addr = 'tcp://127.0.0.1:'
+        converter_addr = 'tcp://127.0.0.1'
         configuration = args[0]
         partitionID = '0X0802'
     elif len(args) == 4:
