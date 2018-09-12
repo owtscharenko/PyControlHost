@@ -641,11 +641,11 @@ class DataConverter(multiprocessing.Process):
                                     
                                     # each event needs a frame header, extra array for header
                                     self.data_header = np.zeros(shape=(1,), dtype= FrHeader)
-                                    self.data_header['size'] = channelID.nbytes + 16
+                                    self.data_header['size'] = channelID.nbytes + 16 # number of hits in event frame
                                     self.data_header['partID'] = self.partitionID
                                     self.data_header['cycleID'] = self.cycle_ID.value
                                     self.data_header['frameTime'] = event[0]['trigger_time_stamp']
-                                    self.data_header['timeExtent'] = ch_event_numbers[i]
+                                    self.data_header['timeExtent'] = ch_event_numbers[i] # number of event in spill
                                     self.data_header['flags'] = 0
                                     
                                     # send header and hit_data to dispatcher

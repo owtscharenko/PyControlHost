@@ -6,6 +6,7 @@ import tables as tb
 import datetime
 from numba import njit, jit
 from ship_data_converter import FrHeader, Hit
+from tqdm import tqdm
 
 import logging
 
@@ -48,13 +49,15 @@ def unpack_run_file(input_file):
                     for row in range(0,headers_in.shape[0]):
                         try:
                             nhits = int((headers_in[row]['size']-16)/4)
-                         
-                            print nhits
+#                             print nhits
                             if nhits <= 0 :
                                 logger.warning('header %s has size %s'% (row,nhits))
                                 if row > 0:
-                                    logger.error('empty header in between frames')
-                                    raise RuntimeWarning
+                                    ''' also breaks if empty header at the end of file. this empty header usually is followed by nhits empty headers.
+                                        in fact no known occurence of an empty header in between normal frames was found but only empty headers at the end.
+                                    '''
+                                    logger.error('empty header in between frames') 
+                                    raise RuntimeWarning 
                                 continue
                             else:
                                 header_out = np.zeros(shape=(1,), dtype = FrHeader)
@@ -74,27 +77,29 @@ def unpack_run_file(input_file):
 #                                 headers[row].tofile(spillfile)
 #                                 hits[i:(i+nhits)].tofile(spillfile)
                                 header_out.tofile(spillfile)
-                                print header_out
                                 hits_out.tofile(spillfile)
-                                print hits_out
                                 i += nhits
                         except RuntimeWarning:
                             logger.info('ended loop')
+                            break
                         
                 
 def check_bytefiles(input_bytefile):
-    with open(input_bytefile, 'rb') as in_file:
-        data  = list(in_file)
-        print data[1]
+    with open(input_bytefile, 'r') as in_file:
+        data  = in_file.read().encode('hex')
+        print data
         
 if __name__ == '__main__':
-    files = ['/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/36_module_0_ext_trigger_scan.h5',
-             '/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_1/36_module_1_ext_trigger_scan.h5',
-             '/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_2/36_module_2_ext_trigger_scan.h5',
-             '/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_3/36_module_3_ext_trigger_scan.h5',
-             '/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_0/37_module_0_ext_trigger_scan.h5',
-             '/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_1/37_module_1_ext_trigger_scan.h5',
-             '/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_2/37_module_2_ext_trigger_scan.h5',
-             '/media/data/SHiP/charm_exp_2018/test_data_converter/elsa_testbeam_data/take_data/module_3/37_module_3_ext_trigger_scan.h5',]
-    unpack_run_file('/media/data/ship_charm_xsec_Jul18/run_data/partition_0x800_run_2467.h5')
-    check_bytefiles('/media/data/ship_charm_xsec_Jul18/run_data/part_0x800/RUN_2467/2018_07_26_16_44_10.txt')
+    
+    raw_data_file_list = []
+    
+    for data_file in os.listdir('/media/data/ship_charm_xsec_Jul18/run_data/'):
+        if data_file[-3:] == '.h5':
+            raw_data_file_list.append(os.path.abspath(os.path.join('/media/data/ship_charm_xsec_Jul18/run_data/', data_file)))
+    
+    for scan_file in tqdm(raw_data_file_list):
+        unpack_run_file(scan_file)
+#         check_bytefiles('/media/data/ship_charm_xsec_Jul18/run_data/part_0x800/RUN_2467/2018_07_26_16_44_10.txt')
+        
+        
+        
