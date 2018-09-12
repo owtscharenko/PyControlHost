@@ -4,6 +4,7 @@ import os
 import numpy as np
 import tables as tb
 import datetime
+import warnings
 from numba import njit, jit
 from ship_data_converter import FrHeader, Hit
 from tqdm import tqdm
@@ -22,6 +23,9 @@ def get_file_date(cycleID):
 
 
 def unpack_run_file(input_file):
+    
+    empty_header_exception = Exception('Empty header inbetween frames')
+    
     partID = input_file.split('_')[-3]
     run_number = input_file.split('_')[-1].split('.')[0]
     directory = os.path.dirname(input_file)
@@ -56,8 +60,7 @@ def unpack_run_file(input_file):
                                     ''' also breaks if empty header at the end of file. this empty header usually is followed by nhits empty headers.
                                         in fact no known occurence of an empty header in between normal frames was found but only empty headers at the end.
                                     '''
-                                    logger.error('empty header in between frames') 
-                                    raise RuntimeWarning 
+                                    raise empty_header_exception
                                 continue
                             else:
                                 header_out = np.zeros(shape=(1,), dtype = FrHeader)
@@ -79,7 +82,7 @@ def unpack_run_file(input_file):
                                 header_out.tofile(spillfile)
                                 hits_out.tofile(spillfile)
                                 i += nhits
-                        except RuntimeWarning:
+                        except empty_header_exception:
                             logger.info('ended loop')
                             break
                         
