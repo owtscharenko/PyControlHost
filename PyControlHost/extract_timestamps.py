@@ -5,6 +5,7 @@ import os
 # from pybar.scans.analyze_ext_trigger_SHiP import analyze_ext_trigger_ship
 from optparse import OptionParser
 from inspect import getmembers, isclass, getargspec
+from prompt_toolkit import output
 
 
 def get_files(dir, run_number, output_folder):
@@ -29,23 +30,22 @@ def extract_timestamp(data_file = None, output_folder = None):
     output_folder: directory where to write .txt file
     
 '''
+    if not output_folder:
+        output_folder = os.path.dirname(data_file)
+        
     with tb.open_file(data_file, 'r') as in_file:
-        for table in in_file.walk_nodes('/', classname= 'Table'):
-            if table.name == 'Headers':
-                header = table[:]
-                
-                print header.dtype
-                header_out = np.zeros(shape = header.shape[0], dtype = [("cycleID",np.uint64),
-                                                                      ("frameTime", np.uint64)])
-    
-                header_out['cycleID'] = header['cycleID']
-                header_out['frameTime'] = header['frameTime']
-                print header_out.dtype
-    #             np.savetxt(data_file[:-3] + 'hits_eventnr.txt', hits, fmt="%i    %i    %i")
-                if output_folder :
-                    np.savetxt(output_folder + os.path.split(data_file)[1][:-3] + 'headers.txt', header_out, fmt="%i    %i", header= "cycleID\tframeTime")
-                else:    
-                    np.savetxt(data_file[:-3] + 'headers.txt', header_out, fmt="%i    %i", header= "cycleID\tframeTime")
+        with open(output_folder + os.path.split(data_file)[1][:-3] + 'headers.txt', 'a') as out_file :
+            print "output written to %s" % (output_folder + os.path.split(data_file)[1][:-3] + 'headers.txt')
+            out_file.write("#cycleID\tframeTime\n")
+            for table in in_file.walk_nodes('/', classname= 'Table'):
+                if table.name == 'Headers':
+                    header = table[:]
+                    header_out = np.zeros(shape = header.shape[0], dtype = [("cycleID",np.uint64),
+                                                                          ("frameTime", np.uint64)])
+        
+                    header_out['cycleID'] = header['cycleID']
+                    header_out['frameTime'] = header['frameTime']
+                    np.savetxt(out_file, header_out, fmt="%i    %i")
             
         
 if __name__ == "__main__":
@@ -58,7 +58,6 @@ if __name__ == "__main__":
     
     for run in scifi_runs:
         get_files(dir = dir, run_number = run, output_folder = output_folder)
-            
     
     
     
